@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string, send_file
 import os
 import json
-from datetime import datetime
 import shutil
 
 app = Flask(__name__)
@@ -39,8 +38,11 @@ def generate():
 
     if machine_id in allowed:
         filename = f"QTY_Network_2025_{machine_id}.xlsm"
-        shutil.copy(TEMPLATE_FILE, filename)
-        return send_file(filename, as_attachment=True)
+        if os.path.exists(TEMPLATE_FILE):
+            shutil.copy(TEMPLATE_FILE, filename)
+            return send_file(filename, as_attachment=True)
+        else:
+            return jsonify({"error": "Template file not found."}), 500
 
     if machine_id not in pending:
         pending[machine_id] = {
