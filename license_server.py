@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, send_file
 import os
 import json
 import hashlib
 import hmac
+import shutil
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -118,6 +119,26 @@ def admin_panel():
     html += "</ul>"
 
     return render_template_string(html)
+
+@app.route("/download", methods=["GET"])
+def download_file():
+    machine_id = request.args.get("mid")
+
+    if not machine_id:
+        return "Missing machine ID", 400
+
+    allowed = load_json(ALLOWED_FILE)
+    if machine_id not in allowed:
+        return "Machine not approved", 403
+
+    src = "template.xlsm"
+    dst = f"QTY_Network_2025_{machine_id}.xlsm"
+
+    try:
+        shutil.copyfile(src, dst)
+        return send_file(dst, as_attachment=True)
+    except Exception as e:
+        return f"Error preparing file: {str(e)}", 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
