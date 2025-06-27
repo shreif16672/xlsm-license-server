@@ -33,12 +33,9 @@ def generate_license():
     pending = load_json(PENDING_FILE)
 
     if machine_id in allowed:
-        # Generate .xlsm filename
         new_filename = f"QTY_Network_2025_{machine_id}.xlsm"
         with open(TEMPLATE_FILE, "rb") as f:
             content = f.read()
-
-        # Save generated file to disk
         with open(new_filename, "wb") as f:
             f.write(content)
 
@@ -52,7 +49,6 @@ def generate_license():
         })
 
     else:
-        # Save to pending if not already listed
         if machine_id not in pending:
             pending[machine_id] = {}
             save_json(PENDING_FILE, pending)
