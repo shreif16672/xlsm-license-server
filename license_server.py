@@ -1,130 +1,125 @@
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, jsonify, send_file, render_template_string
 import os
 import json
-import shutil
-from io import BytesIO
-import zipfile
+import io
 
 app = Flask(__name__)
 
-# === Configuration ===
-PROGRAM_ID = "xlsm_tool"
-PENDING_FILE = "pending_ids_xlsm_tool.json"
-ALLOWED_FILE = "allowed_ids_xlsm_tool.json"
-TEMPLATE_FILE = "template.xlsm"
-LAUNCHER_FILE = "Launcher.xlsm"
-INSTALLER_FILE = "installer_lifetime.exe"
+DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+ALLOWED_IDS_FILE = os.path.join(DATA_DIR, "allowed_ids_xlsm_tool.json")
+PENDING_IDS_FILE = os.path.join(DATA_DIR, "pending_ids_xlsm_tool.json")
+TEMPLATE_FILE = os.path.join(DATA_DIR, "template.xlsm")
+INSTALLER_FILE = os.path.join(DATA_DIR, "installer_lifetime.exe")
+LAUNCHER_FILE = os.path.join(DATA_DIR, "Launcher.xlsm")
 
-# === JSON File Handling ===
-def read_json(filename):
-    if not os.path.exists(filename):
+def load_json(file_path):
+    if not os.path.exists(file_path):
         return {}
-    with open(filename, "r") as f:
+    with open(file_path, "r") as f:
         try:
             return json.load(f)
-        except json.JSONDecodeError:
+        except:
             return {}
 
-def write_json(filename, data):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=2)
+def save_json(file_path, data):
+    with open(file_path, "w") as f:
+        json.dump(data, f, indent=4)
 
-# === License Generator ===
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.json
+    data = request.get_json()
     machine_id = data.get("machine_id")
-    program_id = data.get("program_id")
-    duration = data.get("duration", "lifetime")
 
-    if program_id != PROGRAM_ID:
-        return jsonify({"error": "Invalid program ID"}), 400
+    if not machine_id:
+        return jsonify({"valid": False, "reason": "No machine_id"}), 400
 
-    allowed = read_json(ALLOWED_FILE)
-    pending = read_json(PENDING_FILE)
+    allowed_ids = load_json(ALLOWED_IDS_FILE)
+    if machine_id not in allowed_ids:
+        # Add to pending
+        pending_ids = load_json(PENDING_IDS_FILE)
+        if machine_id not in pending_ids:
+            pending_ids[machine_id] = "pending"
+            save_json(PENDING_IDS_FILE, pending_ids)
+        return jsonify({"valid": False, "reason": "Not allowed"}), 403
 
-    # === Approved: Send ZIP in memory ===
-    if machine_id in allowed:
-        xlsm_name = f"QTY_Network_2025_{machine_id}.xlsm"
-        shutil.copy(TEMPLATE_FILE, xlsm_name)
+    # Generate dynamic xlsm file
+    new_filename = f"QTY_Network_2025_{machine_id}.xlsm"
+    with open(TEMPLATE_FILE, "rb") as f:
+        template_data = f.read()
+    new_xlsm = io.BytesIO(template_data)
+    new_xlsm.seek(0)
 
-        mem_zip = BytesIO()
-        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.write(xlsm_name, arcname=os.path.basename(xlsm_name))
-            zf.write(LAUNCHER_FILE, arcname=os.path.basename(LAUNCHER_FILE))
-            zf.write(INSTALLER_FILE, arcname=os.path.basename(INSTALLER_FILE))
+    return jsonify({
+        "valid": True,
+        "filename": new_filename,
+        "xlsm_data": list(new_xlsm.read()),
+    })
 
-        os.remove(xlsm_name)
+@app.route("/download/<filename>")
+def download_file(filename):
+    if filename.endswith(".exe"):
+        return send_file(INSTALLER_FILE, as_attachment=True)
+    elif filename.endswith(".xlsm") and filename.startswith("QTY_Network_2025_"):
+        return send_file(TEMPLATE_FILE, as_attachment=True)
+    elif filename == "Launcher.xlsm":
+        return send_file(LAUNCHER_FILE, as_attachment=True)
+    return "File not found", 404
 
-        mem_zip.seek(0)
-        return send_file(mem_zip, mimetype="application/zip",
-                         download_name=f"license_package_{machine_id}.zip",
-                         as_attachment=True)
-
-    # === New Request: Add to pending list ===
-    if machine_id not in pending:
-        pending[machine_id] = {
-            "program_id": program_id,
-            "duration": duration
-        }
-        write_json(PENDING_FILE, pending)
-
-    return jsonify({"status": "pending", "message": "Request submitted and waiting for approval."}), 202
-
-# === Admin Panel ===
-@app.route("/admin", methods=["GET", "POST"])
+@app.route("/admin")
 def admin():
-    if request.method == "POST":
-        action = request.form.get("action")
-        machine_id = request.form.get("machine_id")
-
-        pending = read_json(PENDING_FILE)
-        allowed = read_json(ALLOWED_FILE)
-
-        if action == "approve" and machine_id in pending:
-            allowed[machine_id] = pending.pop(machine_id)
-            write_json(ALLOWED_FILE, allowed)
-            write_json(PENDING_FILE, pending)
-        elif action == "reject" and machine_id in pending:
-            pending.pop(machine_id)
-            write_json(PENDING_FILE, pending)
-
-    pending = read_json(PENDING_FILE)
-    allowed = read_json(ALLOWED_FILE)
+    allowed_ids = load_json(ALLOWED_IDS_FILE)
+    pending_ids = load_json(PENDING_IDS_FILE)
 
     html = """
     <h1>XLSM Tool License Admin</h1>
     <h2>Pending</h2>
-    {% if pending %}
-        <ul>
-        {% for machine_id in pending %}
-            <li>
-                <strong>{{ machine_id }}</strong>
-                <form method="post" style="display:inline;">
-                    <input type="hidden" name="machine_id" value="{{ machine_id }}">
-                    <button type="submit" name="action" value="approve">✅ Approve</button>
-                    <button type="submit" name="action" value="reject">❌ Reject</button>
-                </form>
-            </li>
-        {% endfor %}
-        </ul>
+    {% for mid in pending %}
+        <li>
+            {{ mid }}
+            <form method="post" action="/approve" style="display:inline">
+                <input type="hidden" name="machine_id" value="{{ mid }}">
+                <button type="submit">✅ Approve</button>
+            </form>
+            <form method="post" action="/reject" style="display:inline">
+                <input type="hidden" name="machine_id" value="{{ mid }}">
+                <button type="submit">❌ Reject</button>
+            </form>
+        </li>
     {% else %}
         <p>No pending requests.</p>
-    {% endif %}
-
+    {% endfor %}
     <h2>Approved</h2>
-    {% if approved %}
-        <ul>
-        {% for machine_id in approved %}
-            <li>{{ machine_id }}</li>
-        {% endfor %}
-        </ul>
+    {% for mid in allowed %}
+        <li>{{ mid }}</li>
     {% else %}
         <p>No approved machines.</p>
-    {% endif %}
+    {% endfor %}
     """
-    return render_template_string(html, pending=pending, approved=allowed)
+    return render_template_string(html, pending=pending_ids.keys(), allowed=allowed_ids.keys())
 
-# === Entry Point ===
+@app.route("/approve", methods=["POST"])
+def approve():
+    machine_id = request.form.get("machine_id")
+    if machine_id:
+        allowed_ids = load_json(ALLOWED_IDS_FILE)
+        allowed_ids[machine_id] = "approved"
+        save_json(ALLOWED_IDS_FILE, allowed_ids)
+
+        pending_ids = load_json(PENDING_IDS_FILE)
+        if machine_id in pending_ids:
+            del pending_ids[machine_id]
+            save_json(PENDING_IDS_FILE, pending_ids)
+    return "<script>window.location.href = '/admin';</script>"
+
+@app.route("/reject", methods=["POST"])
+def reject():
+    machine_id = request.form.get("machine_id")
+    if machine_id:
+        pending_ids = load_json(PENDING_IDS_FILE)
+        if machine_id in pending_ids:
+            del pending_ids[machine_id]
+            save_json(PENDING_IDS_FILE, pending_ids)
+    return "<script>window.location.href = '/admin';</script>"
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
