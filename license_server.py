@@ -1,125 +1,141 @@
 from flask import Flask, request, jsonify, send_file, render_template_string
-import os
 import json
-import io
+import os
+from datetime import datetime
+import hashlib
 
 app = Flask(__name__)
 
-DATA_DIR = os.path.dirname(os.path.abspath(__file__))
-ALLOWED_IDS_FILE = os.path.join(DATA_DIR, "allowed_ids_xlsm_tool.json")
-PENDING_IDS_FILE = os.path.join(DATA_DIR, "pending_ids_xlsm_tool.json")
-TEMPLATE_FILE = os.path.join(DATA_DIR, "template.xlsm")
-INSTALLER_FILE = os.path.join(DATA_DIR, "installer_lifetime.exe")
-LAUNCHER_FILE = os.path.join(DATA_DIR, "Launcher.xlsm")
+ALLOWED_FILE = "allowed_ids_xlsm_tool.json"
+PENDING_FILE = "pending_ids_xlsm_tool.json"
 
-def load_json(file_path):
-    if not os.path.exists(file_path):
-        return {}
-    with open(file_path, "r") as f:
-        try:
-            return json.load(f)
-        except:
-            return {}
+DOWNLOAD_FILES = [
+    "installer_lifetime.exe",
+    "QTY_Network_2025_{machine_id}.xlsm",
+    "Launcher.xlsm"
+]
 
-def save_json(file_path, data):
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=4)
+# Ensure files exist
+for f in [ALLOWED_FILE, PENDING_FILE]:
+    if not os.path.exists(f):
+        with open(f, "w") as file:
+            json.dump({}, file)
+
+# HTML template for admin interface
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head><title>XLSM Tool License Admin</title></head>
+<body>
+    <h2>XLSM Tool License Admin</h2>
+    <h3>Pending</h3>
+    {% if pending_ids %}
+        <ul>
+        {% for mid in pending_ids %}
+            <li>
+                {{ mid }}
+                <form method="post" action="/admin" style="display:inline;">
+                    <input type="hidden" name="machine_id" value="{{ mid }}">
+                    <button type="submit" name="action" value="approve">✅ Approve</button>
+                    <button type="submit" name="action" value="reject">❌ Reject</button>
+                </form>
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>No pending requests.</p>
+    {% endif %}
+
+    <h3>Approved</h3>
+    <ul>
+    {% for mid in allowed_ids %}
+        <li>{{ mid }}</li>
+    {% endfor %}
+    </ul>
+</body>
+</html>
+"""
 
 @app.route("/generate", methods=["POST"])
-def generate():
+def generate_license():
     data = request.get_json()
-    machine_id = data.get("machine_id")
-
+    machine_id = data.get("machine_id", "").strip().upper()
     if not machine_id:
-        return jsonify({"valid": False, "reason": "No machine_id"}), 400
+        return jsonify({"valid": False, "reason": "Missing machine ID"}), 400
 
-    allowed_ids = load_json(ALLOWED_IDS_FILE)
-    if machine_id not in allowed_ids:
+    # Check if approved
+    with open(ALLOWED_FILE) as f:
+        allowed = json.load(f)
+    if machine_id in allowed:
+        # Write license file
+        license_content = {
+            "machine_id": machine_id,
+            "issued": datetime.now().isoformat()
+        }
+        license_file = f"QTY_Network_2025_{machine_id}.xlsm"
+        template_path = "template.xlsm"
+        if not os.path.exists(template_path):
+            return jsonify({"valid": False, "reason": "Template missing"}), 500
+        # Copy template
+        with open(template_path, "rb") as src, open(license_file, "wb") as dst:
+            dst.write(src.read())
+        return jsonify({
+            "valid": True,
+            "message": "License approved",
+            "files": DOWNLOAD_FILES
+        })
+    else:
         # Add to pending
-        pending_ids = load_json(PENDING_IDS_FILE)
-        if machine_id not in pending_ids:
-            pending_ids[machine_id] = "pending"
-            save_json(PENDING_IDS_FILE, pending_ids)
+        with open(PENDING_FILE) as f:
+            pending = json.load(f)
+        if machine_id not in pending:
+            pending[machine_id] = datetime.now().isoformat()
+            with open(PENDING_FILE, "w") as f:
+                json.dump(pending, f, indent=2)
         return jsonify({"valid": False, "reason": "Not allowed"}), 403
-
-    # Generate dynamic xlsm file
-    new_filename = f"QTY_Network_2025_{machine_id}.xlsm"
-    with open(TEMPLATE_FILE, "rb") as f:
-        template_data = f.read()
-    new_xlsm = io.BytesIO(template_data)
-    new_xlsm.seek(0)
-
-    return jsonify({
-        "valid": True,
-        "filename": new_filename,
-        "xlsm_data": list(new_xlsm.read()),
-    })
 
 @app.route("/download/<filename>")
 def download_file(filename):
-    if filename.endswith(".exe"):
-        return send_file(INSTALLER_FILE, as_attachment=True)
-    elif filename.endswith(".xlsm") and filename.startswith("QTY_Network_2025_"):
-        return send_file(TEMPLATE_FILE, as_attachment=True)
-    elif filename == "Launcher.xlsm":
-        return send_file(LAUNCHER_FILE, as_attachment=True)
-    return "File not found", 404
+    if not os.path.exists(filename):
+        return f"File not found: {filename}", 404
+    return send_file(filename, as_attachment=True)
 
-@app.route("/admin")
-def admin():
-    allowed_ids = load_json(ALLOWED_IDS_FILE)
-    pending_ids = load_json(PENDING_IDS_FILE)
+@app.route("/admin", methods=["GET", "POST"])
+def admin_page():
+    # Handle approval actions
+    if request.method == "POST":
+        action = request.form.get("action")
+        machine_id = request.form.get("machine_id", "").strip().upper()
 
-    html = """
-    <h1>XLSM Tool License Admin</h1>
-    <h2>Pending</h2>
-    {% for mid in pending %}
-        <li>
-            {{ mid }}
-            <form method="post" action="/approve" style="display:inline">
-                <input type="hidden" name="machine_id" value="{{ mid }}">
-                <button type="submit">✅ Approve</button>
-            </form>
-            <form method="post" action="/reject" style="display:inline">
-                <input type="hidden" name="machine_id" value="{{ mid }}">
-                <button type="submit">❌ Reject</button>
-            </form>
-        </li>
-    {% else %}
-        <p>No pending requests.</p>
-    {% endfor %}
-    <h2>Approved</h2>
-    {% for mid in allowed %}
-        <li>{{ mid }}</li>
-    {% else %}
-        <p>No approved machines.</p>
-    {% endfor %}
-    """
-    return render_template_string(html, pending=pending_ids.keys(), allowed=allowed_ids.keys())
+        with open(ALLOWED_FILE) as f:
+            allowed = json.load(f)
+        with open(PENDING_FILE) as f:
+            pending = json.load(f)
 
-@app.route("/approve", methods=["POST"])
-def approve():
-    machine_id = request.form.get("machine_id")
-    if machine_id:
-        allowed_ids = load_json(ALLOWED_IDS_FILE)
-        allowed_ids[machine_id] = "approved"
-        save_json(ALLOWED_IDS_FILE, allowed_ids)
+        if action == "approve":
+            allowed[machine_id] = datetime.now().isoformat()
+            if machine_id in pending:
+                del pending[machine_id]
+        elif action == "reject":
+            if machine_id in pending:
+                del pending[machine_id]
 
-        pending_ids = load_json(PENDING_IDS_FILE)
-        if machine_id in pending_ids:
-            del pending_ids[machine_id]
-            save_json(PENDING_IDS_FILE, pending_ids)
-    return "<script>window.location.href = '/admin';</script>"
+        with open(ALLOWED_FILE, "w") as f:
+            json.dump(allowed, f, indent=2)
+        with open(PENDING_FILE, "w") as f:
+            json.dump(pending, f, indent=2)
 
-@app.route("/reject", methods=["POST"])
-def reject():
-    machine_id = request.form.get("machine_id")
-    if machine_id:
-        pending_ids = load_json(PENDING_IDS_FILE)
-        if machine_id in pending_ids:
-            del pending_ids[machine_id]
-            save_json(PENDING_IDS_FILE, pending_ids)
-    return "<script>window.location.href = '/admin';</script>"
+    # Display interface
+    with open(ALLOWED_FILE) as f:
+        allowed = json.load(f)
+    with open(PENDING_FILE) as f:
+        pending = json.load(f)
+
+    return render_template_string(
+        HTML_TEMPLATE,
+        allowed_ids=list(allowed.keys()),
+        pending_ids=list(pending.keys())
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
