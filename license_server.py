@@ -2,10 +2,12 @@ from flask import Flask, request, jsonify, render_template_string, send_file
 import os
 import json
 import shutil
+from io import BytesIO
 import zipfile
 
 app = Flask(__name__)
 
+# === Configuration ===
 PROGRAM_ID = "xlsm_tool"
 PENDING_FILE = "pending_ids_xlsm_tool.json"
 ALLOWED_FILE = "allowed_ids_xlsm_tool.json"
@@ -13,6 +15,7 @@ TEMPLATE_FILE = "template.xlsm"
 LAUNCHER_FILE = "Launcher.xlsm"
 INSTALLER_FILE = "installer_lifetime.exe"
 
+# === JSON File Handling ===
 def read_json(filename):
     if not os.path.exists(filename):
         return {}
@@ -26,6 +29,7 @@ def write_json(filename, data):
     with open(filename, "w") as f:
         json.dump(data, f, indent=2)
 
+# === License Generator ===
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.json
@@ -39,21 +43,25 @@ def generate():
     allowed = read_json(ALLOWED_FILE)
     pending = read_json(PENDING_FILE)
 
-    # ✅ Approved — generate ZIP
+    # === Approved: Send ZIP in memory ===
     if machine_id in allowed:
         xlsm_name = f"QTY_Network_2025_{machine_id}.xlsm"
-        if not os.path.exists(xlsm_name):
-            shutil.copy(TEMPLATE_FILE, xlsm_name)
+        shutil.copy(TEMPLATE_FILE, xlsm_name)
 
-        zip_name = f"license_package_{machine_id}.zip"
-        with zipfile.ZipFile(zip_name, 'w') as zipf:
-            zipf.write(xlsm_name)
-            zipf.write(LAUNCHER_FILE)
-            zipf.write(INSTALLER_FILE)
+        mem_zip = BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(xlsm_name, arcname=os.path.basename(xlsm_name))
+            zf.write(LAUNCHER_FILE, arcname=os.path.basename(LAUNCHER_FILE))
+            zf.write(INSTALLER_FILE, arcname=os.path.basename(INSTALLER_FILE))
 
-        return send_file(zip_name, as_attachment=True)
+        os.remove(xlsm_name)
 
-    # ❌ Not approved — add to pending
+        mem_zip.seek(0)
+        return send_file(mem_zip, mimetype="application/zip",
+                         download_name=f"license_package_{machine_id}.zip",
+                         as_attachment=True)
+
+    # === New Request: Add to pending list ===
     if machine_id not in pending:
         pending[machine_id] = {
             "program_id": program_id,
@@ -63,6 +71,7 @@ def generate():
 
     return jsonify({"status": "pending", "message": "Request submitted and waiting for approval."}), 202
 
+# === Admin Panel ===
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
     if request.method == "POST":
@@ -116,5 +125,6 @@ def admin():
     """
     return render_template_string(html, pending=pending, approved=allowed)
 
+# === Entry Point ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
