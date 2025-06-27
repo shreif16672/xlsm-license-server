@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template_string, send_file
 import os
 import json
 import shutil
+import zipfile
 
 app = Flask(__name__)
 
@@ -9,6 +10,8 @@ PROGRAM_ID = "xlsm_tool"
 PENDING_FILE = "pending_ids_xlsm_tool.json"
 ALLOWED_FILE = "allowed_ids_xlsm_tool.json"
 TEMPLATE_FILE = "template.xlsm"
+LAUNCHER_FILE = "Launcher.xlsm"
+INSTALLER_FILE = "installer_lifetime.exe"
 
 def read_json(filename):
     if not os.path.exists(filename):
@@ -36,12 +39,19 @@ def generate():
     allowed = read_json(ALLOWED_FILE)
     pending = read_json(PENDING_FILE)
 
-    # ✅ Approved — send file
+    # ✅ Approved — generate ZIP
     if machine_id in allowed:
-        filename = f"QTY_Network_2025_{machine_id}.xlsm"
-        if not os.path.exists(filename):
-            shutil.copy(TEMPLATE_FILE, filename)
-        return send_file(filename, as_attachment=True)
+        xlsm_name = f"QTY_Network_2025_{machine_id}.xlsm"
+        if not os.path.exists(xlsm_name):
+            shutil.copy(TEMPLATE_FILE, xlsm_name)
+
+        zip_name = f"license_package_{machine_id}.zip"
+        with zipfile.ZipFile(zip_name, 'w') as zipf:
+            zipf.write(xlsm_name)
+            zipf.write(LAUNCHER_FILE)
+            zipf.write(INSTALLER_FILE)
+
+        return send_file(zip_name, as_attachment=True)
 
     # ❌ Not approved — add to pending
     if machine_id not in pending:
