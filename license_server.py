@@ -77,11 +77,16 @@ def admin_page():
     approved_html = "".join(f"<li>{mid}</li>" for mid in allowed)
 
     return render_template_string(f"""
+        <html>
+        <head><title>License Admin</title></head>
+        <body>
         <h2>XLSM Tool License Admin</h2>
-        <h3>Pending</h3>
+        <h3>Pending Requests</h3>
         <ul>{pending_html if pending_html else "<li>No pending requests.</li>"}</ul>
-        <h3>Approved</h3>
+        <h3>Approved Machine IDs</h3>
         <ul>{approved_html if approved_html else "<li>No approved IDs.</li>"}</ul>
+        </body>
+        </html>
     """)
 
 
