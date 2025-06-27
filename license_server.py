@@ -66,28 +66,25 @@ def admin_page():
 
     pending_html = ""
     for mid in pending:
-        pending_html += f"<li>{mid} " \
-                        f"<form method='post' action='/approve' style='display:inline'>" \
-                        f"<input type='hidden' name='machine_id' value='{mid}'>" \
-                        f"<button type='submit'>✅ Approve</button></form> " \
-                        f"<form method='post' action='/reject' style='display:inline'>" \
-                        f"<input type='hidden' name='machine_id' value='{mid}'>" \
-                        f"<button type='submit'>❌ Reject</button></form></li>"
+        pending_html += f"<li>{mid} "                         f"<form method='post' action='/approve' style='display:inline'>"                         f"<input type='hidden' name='machine_id' value='{mid}'>"                         f"<button type='submit'>✅ Approve</button></form> "                         f"<form method='post' action='/reject' style='display:inline'>"                         f"<input type='hidden' name='machine_id' value='{mid}'>"                         f"<button type='submit'>❌ Reject</button></form></li>"
 
     approved_html = "".join(f"<li>{mid}</li>" for mid in allowed)
 
-    return render_template_string(f"""
-        <html>
-        <head><title>License Admin</title></head>
-        <body>
-        <h2>XLSM Tool License Admin</h2>
-        <h3>Pending Requests</h3>
-        <ul>{pending_html if pending_html else "<li>No pending requests.</li>"}</ul>
-        <h3>Approved Machine IDs</h3>
-        <ul>{approved_html if approved_html else "<li>No approved IDs.</li>"}</ul>
-        </body>
-        </html>
-    """)
+    html = """<html>
+    <head><title>License Admin</title></head>
+    <body>
+    <h2>XLSM Tool License Admin</h2>
+    <h3>Pending Requests</h3>
+    <ul>{pending}</ul>
+    <h3>Approved Machine IDs</h3>
+    <ul>{approved}</ul>
+    </body>
+    </html>""".format(
+        pending=pending_html if pending_html else "<li>No pending requests.</li>",
+        approved=approved_html if approved_html else "<li>No approved IDs.</li>"
+    )
+
+    return render_template_string(html)
 
 
 @app.route("/approve", methods=["POST"])
