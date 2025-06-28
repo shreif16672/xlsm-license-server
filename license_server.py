@@ -29,18 +29,34 @@ def save_json(filepath, data):
 def generate_license():
     try:
         data = request.get_json()
-        machine_id = data.get("machine_id")
-        if not machine_id:
-            return jsonify({"valid": False, "reason": "No machine ID provided"}), 400
+        machine_id = data["machine_id"]
+        program_id = data.get("program_id", "xlsm_tool")  # default to xlsm_tool
 
-        allowed_ids = load_json(ALLOWED_IDS_FILE)
+        allowed_file = f"allowed_ids_{program_id}.json"
+        pending_file = f"pending_ids_{program_id}.json"
 
-        if machine_id not in allowed_ids:
-            pending_ids = load_json(PENDING_IDS_FILE)
+        # Load allowed list
+        allowed_ids = load_json(allowed_file)
+        if not isinstance(allowed_ids, list):
+            allowed_ids = []
+
+        if machine_id in allowed_ids:
+            # ✅ Approved
+            license_data = {"machine_id": machine_id, "program_id": program_id}
+            encoded = base64.b64encode(json.dumps(license_data).encode()).decode()
+            return jsonify({"valid": True, "license": encoded})
+        else:
+            # Add to pending list only if not already there
+            pending_ids = load_json(pending_file)
+            if not isinstance(pending_ids, list):
+                pending_ids = []
             if machine_id not in pending_ids:
                 pending_ids.append(machine_id)
-                save_json(PENDING_IDS_FILE, pending_ids)
-            return jsonify({"valid": False, "reason": "Not allowed"}), 403
+                save_json(pending_file, pending_ids)
+
+            return jsonify({"valid": False, "reason": "Not allowed"})
+    except Exception as e:
+        return jsonify({"valid": False, "reason": str(e)})
 
         # Approved license
         license_data = {
