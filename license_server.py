@@ -99,18 +99,31 @@ def admin_panel():
     html += "</ul>"
     return html
 
-@app.route("/approve", methods=["POST"])
-def approve_id():
-    mid = request.form.get("id")
-    allowed = load_json(ALLOWED_IDS_FILE)
-    pending = load_json(PENDING_IDS_FILE)
-    if mid and mid not in allowed:
-        allowed.append(mid)
-        save_json(ALLOWED_IDS_FILE, allowed)
-    if mid in pending:
-        pending.remove(mid)
-        save_json(PENDING_IDS_FILE, pending)
-    return '<script>window.location.href="/admin";</script>'
+@app.route("/approve/<program>/<machine_id>", methods=["POST"])
+def approve_id(program, machine_id):
+    try:
+        allowed_file = f"allowed_ids_{program}.json"
+        pending_file = f"pending_ids_{program}.json"
+
+        allowed_ids = load_json(allowed_file)
+        if not isinstance(allowed_ids, list):
+            allowed_ids = []
+
+        pending_ids = load_json(pending_file)
+        if not isinstance(pending_ids, list):
+            pending_ids = []
+
+        if machine_id not in allowed_ids:
+            allowed_ids.append(machine_id)
+        if machine_id in pending_ids:
+            pending_ids.remove(machine_id)
+
+        save_json(allowed_file, allowed_ids)
+        save_json(pending_file, pending_ids)
+
+        return redirect("/admin")
+    except Exception as e:
+        return f"Internal Server Error: {e}", 500
 
 @app.route("/reject", methods=["POST"])
 def reject_id():
