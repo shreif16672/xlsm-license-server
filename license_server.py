@@ -1,116 +1,111 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask import Flask, request, send_file, jsonify, render_template_string
 import os
 import json
 import shutil
 import time
 
 app = Flask(__name__)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LICENSE_DIR = os.path.join(BASE_DIR, "licenses")
 
-if not os.path.exists(LICENSE_DIR):
-    os.makedirs(LICENSE_DIR)
+# Constants
+PROGRAM_ID = "xlsm_tool"
+LICENSE_FOLDER = "xlsm_licenses"
+TEMPLATE_FILE = "template.xlsm"
 
-# Storage files
-PENDING_FILE = os.path.join(BASE_DIR, "pending_ids_xlsm_tool.json")
-ALLOWED_FILE = os.path.join(BASE_DIR, "allowed_ids_xlsm_tool.json")
-REJECTED_FILE = os.path.join(BASE_DIR, "rejected_ids_xlsm_tool.json")
+# Ensure folders exist
+os.makedirs(LICENSE_FOLDER, exist_ok=True)
 
-# Load or initialize JSON files
-for file in [PENDING_FILE, ALLOWED_FILE, REJECTED_FILE]:
-    if not os.path.exists(file):
-        with open(file, "w") as f:
+# JSON storage files
+allowed_file = f"allowed_ids_{PROGRAM_ID}.json"
+pending_file = f"pending_ids_{PROGRAM_ID}.json"
+rejected_file = f"rejected_ids_{PROGRAM_ID}.json"
+
+def load_json(filename):
+    if not os.path.exists(filename):
+        with open(filename, "w") as f:
             json.dump([], f)
-
-def load_ids(file_path):
-    with open(file_path, "r") as f:
+    with open(filename, "r") as f:
         return json.load(f)
 
-def save_ids(file_path, data):
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=2)
-
-def generate_password(machine_id):
-    seed = 12345
-    for char in machine_id:
-        seed += ord(char)
-    return f"PWD{seed}"
+def save_json(filename, data):
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
 
 @app.route("/generate", methods=["POST"])
-def generate():
-    data = request.get_json()
-    machine_id = data.get("machine_id")
+def generate_license():
+    data = request.json
+    machine_id = data.get("machine_id", "").strip().upper()
+    program_id = data.get("program_id", "")
 
-    if not machine_id:
-        return jsonify({"error": "Missing machine_id"}), 403
+    if not machine_id or program_id != PROGRAM_ID:
+        return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 403
 
-    allowed_ids = load_ids(ALLOWED_FILE)
-    rejected_ids = load_ids(REJECTED_FILE)
-    pending_ids = load_ids(PENDING_FILE)
+    allowed = load_json(allowed_file)
+    pending = load_json(pending_file)
+    rejected = load_json(rejected_file)
 
-    if machine_id in rejected_ids:
-        return jsonify({"error": "Rejected"}), 403
+    if machine_id in rejected:
+        return jsonify({"valid": False, "reason": "Rejected"}), 403
 
-    if machine_id not in allowed_ids:
-        if machine_id not in pending_ids:
-            pending_ids.append(machine_id)
-            save_ids(PENDING_FILE, pending_ids)
-        return jsonify({"message": "Pending approval"}), 403
+    if machine_id not in allowed:
+        if machine_id not in pending:
+            pending.append(machine_id)
+            save_json(pending_file, pending)
+        return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Approved: generate license file
-    password = generate_password(machine_id)
-    license_path = os.path.join(LICENSE_DIR, f"{machine_id}.txt")
+    # Generate password format (PWDxxxxx)
+    seed = 12345 + sum(ord(char) for char in machine_id)
+    password = f"PWD{seed}"
+
+    # Save license.txt format
+    license_path = os.path.join(LICENSE_FOLDER, f"{machine_id}_license.txt")
     with open(license_path, "w") as f:
         f.write(f"{machine_id}\n{password}")
 
-    # Copy XLSM file
-    target_filename = f"QTY_Network_2025_{machine_id}.xlsm"
-    target_path = os.path.join(BASE_DIR, target_filename)
-    if not os.path.exists(target_path):
-        shutil.copyfile("template.xlsm", target_path)
+    # Copy and rename XLSM file
+    new_xlsm_name = f"QTY_Network_2025_{machine_id}.xlsm"
+    new_xlsm_path = os.path.join(LICENSE_FOLDER, new_xlsm_name)
+    if not os.path.exists(new_xlsm_path):
+        shutil.copyfile(TEMPLATE_FILE, new_xlsm_path)
 
-    # Wait for file to be ready
-    for _ in range(20):
-        if os.path.exists(target_path):
+    # Wait until file is available
+    for _ in range(10):
+        if os.path.exists(new_xlsm_path):
             break
-        time.sleep(0.2)
+        time.sleep(0.5)
 
-    if not os.path.exists(target_path):
-        return jsonify({"error": "Failed to prepare .xlsm"}), 500
+    if not os.path.exists(new_xlsm_path):
+        return jsonify({"valid": False, "reason": "XLSM generation failed"}), 500
 
     return jsonify({
-        "license_file": f"{machine_id}.txt",
-        "launcher": "Launcher.xlsm",
-        "installer": "installer_lifetime.exe",
-        "xlsm_file": target_filename
+        "valid": True,
+        "license_path": license_path,
+        "download_files": {
+            "installer_lifetime.exe": "installer_lifetime.exe",
+            "Launcher.xlsm": "Launcher.xlsm",
+            new_xlsm_name: new_xlsm_path
+        }
     })
-
-@app.route("/download/<path:filename>")
-def download(filename):
-    return send_from_directory(BASE_DIR, filename, as_attachment=True)
 
 @app.route("/admin")
 def admin():
-    pending = load_ids(PENDING_FILE)
-    allowed = load_ids(ALLOWED_FILE)
-    rejected = load_ids(REJECTED_FILE)
+    pending = load_json(pending_file)
+    allowed = load_json(allowed_file)
+    rejected = load_json(rejected_file)
 
     html = """
     <h1>XLSM Tool License Admin</h1>
     <h2>Pending Machine IDs</h2>
     <ul>
     {% for mid in pending %}
-        <li>{{ mid }} ✅ <a href="/approve/{{ mid }}">Approve</a> ❌ <a href="/reject/{{ mid }}">Reject</a></li>
+        <li>{{ mid }} ✅<a href="/approve/{{ mid }}">Approve</a> ❌<a href="/reject/{{ mid }}">Reject</a></li>
     {% endfor %}
     </ul>
-
     <h2>Approved Machine IDs</h2>
     <ul>
     {% for mid in allowed %}
         <li>{{ mid }}</li>
     {% endfor %}
     </ul>
-
     <h2>Rejected Machine IDs</h2>
     <ul>
     {% for mid in rejected %}
@@ -122,39 +117,34 @@ def admin():
 
 @app.route("/approve/<machine_id>")
 def approve(machine_id):
-    pending = load_ids(PENDING_FILE)
-    allowed = load_ids(ALLOWED_FILE)
-    rejected = load_ids(REJECTED_FILE)
-
-    if machine_id in pending:
-        pending.remove(machine_id)
+    allowed = load_json(allowed_file)
+    pending = load_json(pending_file)
     if machine_id not in allowed:
         allowed.append(machine_id)
-    if machine_id in rejected:
-        rejected.remove(machine_id)
-
-    save_ids(PENDING_FILE, pending)
-    save_ids(ALLOWED_FILE, allowed)
-    save_ids(REJECTED_FILE, rejected)
-    return "✅ Approved. <a href='/admin'>Back</a>"
+        save_json(allowed_file, allowed)
+    if machine_id in pending:
+        pending.remove(machine_id)
+        save_json(pending_file, pending)
+    return f"✅ Approved {machine_id}. <a href='/admin'>Back</a>"
 
 @app.route("/reject/<machine_id>")
 def reject(machine_id):
-    pending = load_ids(PENDING_FILE)
-    allowed = load_ids(ALLOWED_FILE)
-    rejected = load_ids(REJECTED_FILE)
-
-    if machine_id in pending:
-        pending.remove(machine_id)
-    if machine_id in allowed:
-        allowed.remove(machine_id)
+    rejected = load_json(rejected_file)
+    pending = load_json(pending_file)
     if machine_id not in rejected:
         rejected.append(machine_id)
+        save_json(rejected_file, rejected)
+    if machine_id in pending:
+        pending.remove(machine_id)
+        save_json(pending_file, pending)
+    return f"❌ Rejected {machine_id}. <a href='/admin'>Back</a>"
 
-    save_ids(PENDING_FILE, pending)
-    save_ids(ALLOWED_FILE, allowed)
-    save_ids(REJECTED_FILE, rejected)
-    return "❌ Rejected. <a href='/admin'>Back</a>"
+@app.route("/download/<filename>")
+def download_file(filename):
+    file_path = os.path.join(LICENSE_FOLDER, filename)
+    if not os.path.exists(file_path):
+        return "File not found", 404
+    return send_file(file_path, as_attachment=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
