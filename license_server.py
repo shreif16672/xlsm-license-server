@@ -1,9 +1,8 @@
-# license_server.py (final version for xlsm tool)
+# license_server.py (corrected version for XLSM license format)
 
 import os
 import json
 import shutil
-import uuid
 import time
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 
@@ -61,25 +60,25 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Generate machine-specific xlsm
-    new_file = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
-    if not os.path.exists(new_file):
-        shutil.copyfile(TEMPLATE_XLSM, new_file)
+    # Generate output file
+    target_xlsm = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
+    if not os.path.exists(target_xlsm):
+        shutil.copyfile(TEMPLATE_XLSM, target_xlsm)
 
-        # Write license content
-        license_path = os.path.join(LICENSES_DIR, f"license_{machine_id}.txt")
-        password = "PWD" + str(uuid.uuid4().int)[-5:]
-        with open(license_path, "w") as f:
+        # Save proper license format: 2 lines: machine_id and PWD
+        license_txt = os.path.join(LICENSES_DIR, f"license_{machine_id}.txt")
+        password = "PWD" + machine_id[-5:]  # or use random if needed
+        with open(license_txt, "w") as f:
             f.write(machine_id + "\n" + password)
 
-    # Wait until file exists
+    # Wait for XLSM to be available
     timeout = 10
-    while not os.path.exists(new_file) and timeout > 0:
+    while not os.path.exists(target_xlsm) and timeout > 0:
         time.sleep(1)
         timeout -= 1
 
-    if not os.path.exists(new_file):
-        return jsonify({"valid": False, "reason": "File not ready"}), 500
+    if not os.path.exists(target_xlsm):
+        return jsonify({"valid": False, "reason": "XLSM not ready"}), 500
 
     return jsonify({
         "valid": True,
@@ -96,50 +95,44 @@ def admin_panel():
     allowed = load_json(JSON_PATHS["allowed"])
     pending = load_json(JSON_PATHS["pending"])
     rejected = load_json(JSON_PATHS["rejected"])
-
     html = """
     <h1>Admin Panel — XLSM Tool</h1>
     <h2>Pending IDs</h2>
     <ul>
-        {% for mid in pending %}
-            <li>{{ mid }} 
-                <a href="/admin/approve/{{ mid }}">✅ Approve</a> | 
-                <a href="/admin/reject/{{ mid }}">❌ Reject</a>
-            </li>
-        {% endfor %}
+    {% for mid in pending %}
+        <li>{{ mid }} <a href="/admin/approve/{{ mid }}">✅ Approve</a> | <a href="/admin/reject/{{ mid }}">❌ Reject</a></li>
+    {% endfor %}
     </ul>
-    <h2>Approved IDs</h2>
-    <ul>{% for mid in allowed %}<li>{{ mid }}</li>{% endfor %}</ul>
-    <h2>Rejected IDs</h2>
-    <ul>{% for mid in rejected %}<li>{{ mid }}</li>{% endfor %}</ul>
+    <h2>Approved</h2><ul>{% for mid in allowed %}<li>{{ mid }}</li>{% endfor %}</ul>
+    <h2>Rejected</h2><ul>{% for mid in rejected %}<li>{{ mid }}</li>{% endfor %}</ul>
     """
     return render_template_string(html, pending=pending, allowed=allowed, rejected=rejected)
 
 @app.route("/admin/approve/<machine_id>")
 def approve(machine_id):
-    machine_id = machine_id.upper()
+    mid = machine_id.upper()
     allowed = load_json(JSON_PATHS["allowed"])
     pending = load_json(JSON_PATHS["pending"])
-    if machine_id not in allowed:
-        allowed.append(machine_id)
-    if machine_id in pending:
-        pending.remove(machine_id)
+    if mid not in allowed:
+        allowed.append(mid)
+    if mid in pending:
+        pending.remove(mid)
     save_json(JSON_PATHS["allowed"], allowed)
     save_json(JSON_PATHS["pending"], pending)
-    return f"✅ Approved {machine_id}. <a href='/admin'>Back</a>"
+    return f"✅ Approved {mid}. <a href='/admin'>Back</a>"
 
 @app.route("/admin/reject/<machine_id>")
 def reject(machine_id):
-    machine_id = machine_id.upper()
+    mid = machine_id.upper()
     rejected = load_json(JSON_PATHS["rejected"])
     pending = load_json(JSON_PATHS["pending"])
-    if machine_id not in rejected:
-        rejected.append(machine_id)
-    if machine_id in pending:
-        pending.remove(machine_id)
+    if mid not in rejected:
+        rejected.append(mid)
+    if mid in pending:
+        pending.remove(mid)
     save_json(JSON_PATHS["rejected"], rejected)
     save_json(JSON_PATHS["pending"], pending)
-    return f"❌ Rejected {machine_id}. <a href='/admin'>Back</a>"
+    return f"❌ Rejected {mid}. <a href='/admin'>Back</a>"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
