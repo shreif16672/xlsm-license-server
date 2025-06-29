@@ -1,16 +1,15 @@
+# license_server.py (Render-safe, for XLSM external license.txt)
+
 import os
 import json
-import shutil
 import subprocess
-import time
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
-import xlwings as xw
 
 app = Flask(__name__)
 
 PROGRAM_ID = "xlsm_tool"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_XLSM = os.path.join(BASE_DIR, "template.xlsm")
+LICENSE_FOLDER = os.path.join(BASE_DIR, "generated_licenses")
 
 FILES_TO_SEND = [
     "Launcher.xlsm",
@@ -23,7 +22,7 @@ JSON_PATHS = {
     "rejected": os.path.join(BASE_DIR, f"rejected_ids_{PROGRAM_ID}.json"),
 }
 
-os.makedirs(BASE_DIR, exist_ok=True)
+os.makedirs(LICENSE_FOLDER, exist_ok=True)
 for path in JSON_PATHS.values():
     if not os.path.exists(path):
         with open(path, "w") as f:
@@ -35,7 +34,7 @@ def get_drive_serial():
         for line in output.splitlines():
             if "Serial Number is" in line:
                 return line.strip().split("is")[-1].strip().replace("-", "")
-    except Exception as e:
+    except:
         return "UNKNOWN"
 
 def generate_password(machine_id):
@@ -74,35 +73,23 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Create licensed .xlsm
-    target_file = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
-    if not os.path.exists(target_file):
-        shutil.copyfile(TEMPLATE_XLSM, target_file)
-
-        try:
-            app_xl = xw.App(visible=False)
-            wb = app_xl.books.open(target_file)
-            try:
-                sheet = wb.sheets["LicenseData"]
-            except:
-                sheet = wb.sheets.add(name="LicenseData", after=wb.sheets[-1])
-            sheet["A1"].value = machine_id
-            sheet["A2"].value = generate_password(machine_id)
-            sheet.api.Visible = 2  # xlSheetVeryHidden
-            wb.save()
-            wb.close()
-            app_xl.quit()
-        except Exception as e:
-            return jsonify({"valid": False, "reason": f"Excel write error: {e}"}), 500
+    # Generate license.txt file
+    license_path = os.path.join(LICENSE_FOLDER, f"license_{machine_id}.txt")
+    if not os.path.exists(license_path):
+        password = generate_password(machine_id)
+        with open(license_path, "w") as f:
+            f.write(machine_id + "\n" + password)
 
     return jsonify({
         "valid": True,
         "machine_id": machine_id,
-        "download_files": FILES_TO_SEND + [f"QTY_Network_2025_{machine_id}.xlsm"]
+        "download_files": FILES_TO_SEND + [f"license_{machine_id}.txt"]
     })
 
 @app.route("/files/<filename>")
 def download_file(filename):
+    if filename.startswith("license_") and filename.endswith(".txt"):
+        return send_from_directory(LICENSE_FOLDER, filename, as_attachment=True)
     return send_from_directory(BASE_DIR, filename, as_attachment=True)
 
 @app.route("/admin")
