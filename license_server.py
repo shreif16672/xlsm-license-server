@@ -1,4 +1,4 @@
-# license_server.py (corrected version for XLSM license format)
+# license_server.py (final with license.txt copied for download)
 
 import os
 import json
@@ -60,18 +60,21 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Generate output file
+    # Generate output XLSM file
     target_xlsm = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
     if not os.path.exists(target_xlsm):
         shutil.copyfile(TEMPLATE_XLSM, target_xlsm)
 
-        # Save proper license format: 2 lines: machine_id and PWD
-        license_txt = os.path.join(LICENSES_DIR, f"license_{machine_id}.txt")
-        password = "PWD" + machine_id[-5:]  # or use random if needed
-        with open(license_txt, "w") as f:
-            f.write(machine_id + "\n" + password)
+        # Create correct license format
+        license_text = machine_id + "\n" + "PWD" + machine_id[-5:]
+        license_path_full = os.path.join(LICENSES_DIR, f"license_{machine_id}.txt")
+        with open(license_path_full, "w") as f:
+            f.write(license_text)
 
-    # Wait for XLSM to be available
+        # Also copy license to project folder for download
+        shutil.copyfile(license_path_full, os.path.join(BASE_DIR, "license.txt"))
+
+    # Wait for XLSM
     timeout = 10
     while not os.path.exists(target_xlsm) and timeout > 0:
         time.sleep(1)
@@ -83,7 +86,7 @@ def generate_license():
     return jsonify({
         "valid": True,
         "machine_id": machine_id,
-        "download_files": FILES_TO_SEND + [f"QTY_Network_2025_{machine_id}.xlsm"]
+        "download_files": FILES_TO_SEND + [f"QTY_Network_2025_{machine_id}.xlsm", "license.txt"]
     })
 
 @app.route("/files/<filename>")
