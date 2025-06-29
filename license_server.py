@@ -1,8 +1,8 @@
-# license_server.py (Render-safe, for XLSM external license.txt)
+# license_server.py — final Render version for external license.txt and auto XLSM creation
 
 import os
 import json
-import subprocess
+import shutil
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 
 app = Flask(__name__)
@@ -10,6 +10,7 @@ app = Flask(__name__)
 PROGRAM_ID = "xlsm_tool"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LICENSE_FOLDER = os.path.join(BASE_DIR, "generated_licenses")
+TEMPLATE_FILE = os.path.join(BASE_DIR, "template.xlsm")
 
 FILES_TO_SEND = [
     "Launcher.xlsm",
@@ -27,15 +28,6 @@ for path in JSON_PATHS.values():
     if not os.path.exists(path):
         with open(path, "w") as f:
             json.dump([], f)
-
-def get_drive_serial():
-    try:
-        output = subprocess.check_output('vol C:', shell=True, text=True)
-        for line in output.splitlines():
-            if "Serial Number is" in line:
-                return line.strip().split("is")[-1].strip().replace("-", "")
-    except:
-        return "UNKNOWN"
 
 def generate_password(machine_id):
     seed = 12345
@@ -73,22 +65,30 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Generate license.txt file
+    # Create license.txt
     license_path = os.path.join(LICENSE_FOLDER, f"license_{machine_id}.txt")
     if not os.path.exists(license_path):
         password = generate_password(machine_id)
         with open(license_path, "w") as f:
             f.write(machine_id + "\n" + password)
 
+    # Create machine-specific .xlsm from template
+    output_xlsm = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
+    if not os.path.exists(output_xlsm):
+        shutil.copyfile(TEMPLATE_FILE, output_xlsm)
+
     return jsonify({
         "valid": True,
         "machine_id": machine_id,
-        "download_files": FILES_TO_SEND + [f"license_{machine_id}.txt"]
+        "download_files": FILES_TO_SEND + [
+            f"license_{machine_id}.txt",
+            f"QTY_Network_2025_{machine_id}.xlsm"
+        ]
     })
 
 @app.route("/files/<filename>")
 def download_file(filename):
-    if filename.startswith("license_") and filename.endswith(".txt"):
+    if filename.startswith("license_"):
         return send_from_directory(LICENSE_FOLDER, filename, as_attachment=True)
     return send_from_directory(BASE_DIR, filename, as_attachment=True)
 
