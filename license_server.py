@@ -1,16 +1,17 @@
-# license_server.py — matches Excel logic (GetMachineID + GeneratePassword)
+# license_server.py — FINAL version (writes machine ID and password to hidden sheet)
 
 import os
 import json
 import shutil
 import time
+import uuid
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from openpyxl import load_workbook
 
 app = Flask(__name__)
 
 PROGRAM_ID = "xlsm_tool"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LICENSES_DIR = os.path.join(BASE_DIR, "licenses")
 TEMPLATE_XLSM = os.path.join(BASE_DIR, "template.xlsm")
 
 FILES_TO_SEND = [
@@ -24,7 +25,8 @@ JSON_PATHS = {
     "rejected": os.path.join(BASE_DIR, f"rejected_ids_{PROGRAM_ID}.json"),
 }
 
-os.makedirs(LICENSES_DIR, exist_ok=True)
+# Create needed files
+os.makedirs(BASE_DIR, exist_ok=True)
 for path in JSON_PATHS.values():
     if not os.path.exists(path):
         with open(path, "w") as f:
@@ -66,30 +68,28 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Create machine-specific XLSM
-    xlsm_path = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
-    if not os.path.exists(xlsm_path):
-        shutil.copyfile(TEMPLATE_XLSM, xlsm_path)
+    # Create personalized file
+    target_file = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
+    if not os.path.exists(target_file):
+        shutil.copyfile(TEMPLATE_XLSM, target_file)
 
-        # License content
-        password = generate_password(machine_id)
-        license_text = machine_id + "\n" + password
-        license_file_path = os.path.join(BASE_DIR, "license.txt")
-        with open(license_file_path, "w") as f:
-            f.write(license_text)
-
-    timeout = 10
-    while not os.path.exists(xlsm_path) and timeout > 0:
-        time.sleep(1)
-        timeout -= 1
-
-    if not os.path.exists(xlsm_path):
-        return jsonify({"valid": False, "reason": "XLSM not ready"}), 500
+        # Write license inside XLSM file
+        try:
+            wb = load_workbook(filename=target_file, keep_vba=True)
+            if "LicenseData" not in wb.sheetnames:
+                ws = wb.create_sheet("LicenseData")
+            else:
+                ws = wb["LicenseData"]
+            ws["A1"] = machine_id
+            ws["A2"] = generate_password(machine_id)
+            wb.save(target_file)
+        except Exception as e:
+            return jsonify({"valid": False, "reason": f"Failed to write license: {str(e)}"}), 500
 
     return jsonify({
         "valid": True,
         "machine_id": machine_id,
-        "download_files": FILES_TO_SEND + [f"QTY_Network_2025_{machine_id}.xlsm", "license.txt"]
+        "download_files": FILES_TO_SEND + [f"QTY_Network_2025_{machine_id}.xlsm"]
     })
 
 @app.route("/files/<filename>")
