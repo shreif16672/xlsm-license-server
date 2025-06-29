@@ -1,5 +1,3 @@
-# license_server.py — final Render version for external license.txt and auto XLSM creation
-
 import os
 import json
 import shutil
@@ -30,10 +28,8 @@ for path in JSON_PATHS.values():
             json.dump([], f)
 
 def generate_password(machine_id):
-    seed = 12345
-    for ch in machine_id:
-        seed += ord(ch)
-    return "PWD" + str(seed)
+    total = sum(ord(ch) for ch in machine_id)
+    return "PWD" + str(total + 12345)
 
 def load_json(path):
     with open(path, "r") as f:
@@ -72,7 +68,7 @@ def generate_license():
         with open(license_path, "w") as f:
             f.write(machine_id + "\n" + password)
 
-    # Create machine-specific .xlsm from template
+    # Create .xlsm for this machine
     output_xlsm = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
     if not os.path.exists(output_xlsm):
         shutil.copyfile(TEMPLATE_FILE, output_xlsm)
