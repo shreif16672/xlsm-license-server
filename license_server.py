@@ -1,4 +1,4 @@
-# license_server.py (final with license.txt copied for download)
+# license_server.py — matches Excel logic (GetMachineID + GeneratePassword)
 
 import os
 import json
@@ -30,6 +30,12 @@ for path in JSON_PATHS.values():
         with open(path, "w") as f:
             json.dump([], f)
 
+def generate_password(machine_id):
+    seed = 12345
+    for ch in machine_id:
+        seed += ord(ch)
+    return "PWD" + str(seed)
+
 def load_json(path):
     with open(path, "r") as f:
         return json.load(f)
@@ -60,27 +66,24 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Generate output XLSM file
-    target_xlsm = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
-    if not os.path.exists(target_xlsm):
-        shutil.copyfile(TEMPLATE_XLSM, target_xlsm)
+    # Create machine-specific XLSM
+    xlsm_path = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
+    if not os.path.exists(xlsm_path):
+        shutil.copyfile(TEMPLATE_XLSM, xlsm_path)
 
-        # Create correct license format
-        license_text = machine_id + "\n" + "PWD" + machine_id[-5:]
-        license_path_full = os.path.join(LICENSES_DIR, f"license_{machine_id}.txt")
-        with open(license_path_full, "w") as f:
+        # License content
+        password = generate_password(machine_id)
+        license_text = machine_id + "\n" + password
+        license_file_path = os.path.join(BASE_DIR, "license.txt")
+        with open(license_file_path, "w") as f:
             f.write(license_text)
 
-        # Also copy license to project folder for download
-        shutil.copyfile(license_path_full, os.path.join(BASE_DIR, "license.txt"))
-
-    # Wait for XLSM
     timeout = 10
-    while not os.path.exists(target_xlsm) and timeout > 0:
+    while not os.path.exists(xlsm_path) and timeout > 0:
         time.sleep(1)
         timeout -= 1
 
-    if not os.path.exists(target_xlsm):
+    if not os.path.exists(xlsm_path):
         return jsonify({"valid": False, "reason": "XLSM not ready"}), 500
 
     return jsonify({
@@ -101,11 +104,9 @@ def admin_panel():
     html = """
     <h1>Admin Panel — XLSM Tool</h1>
     <h2>Pending IDs</h2>
-    <ul>
-    {% for mid in pending %}
+    <ul>{% for mid in pending %}
         <li>{{ mid }} <a href="/admin/approve/{{ mid }}">✅ Approve</a> | <a href="/admin/reject/{{ mid }}">❌ Reject</a></li>
-    {% endfor %}
-    </ul>
+    {% endfor %}</ul>
     <h2>Approved</h2><ul>{% for mid in allowed %}<li>{{ mid }}</li>{% endfor %}</ul>
     <h2>Rejected</h2><ul>{% for mid in rejected %}<li>{{ mid }}</li>{% endfor %}</ul>
     """
