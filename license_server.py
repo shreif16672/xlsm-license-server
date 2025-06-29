@@ -1,31 +1,17 @@
-from flask import Flask, request, jsonify, render_template_string, send_from_directory
-import os
+from flask import Flask, request, jsonify, render_template_string
 import json
+import os
 
 app = Flask(__name__)
 
-PROGRAM_ID = "xlsm_tool"
-DATA_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(DATA_DIR, "static")
+DATA_FILE = "allowed_ids_xlsm_tool.json"
+PENDING_FILE = "pending_ids_xlsm_tool.json"
+REJECTED_FILE = "rejected_ids_xlsm_tool.json"
 
-# File paths
-PENDING_FILE = os.path.join(DATA_DIR, f"pending_ids_{PROGRAM_ID}.json")
-ALLOWED_FILE = os.path.join(DATA_DIR, f"allowed_ids_{PROGRAM_ID}.json")
-REJECTED_FILE = os.path.join(DATA_DIR, f"rejected_ids_{PROGRAM_ID}.json")
-
-# Ensure data files exist
-for file_path in [PENDING_FILE, ALLOWED_FILE, REJECTED_FILE]:
-    if not os.path.exists(file_path):
-        with open(file_path, "w") as f:
-            json.dump([], f)
-
-def load_json(file_path):
-    with open(file_path, "r") as f:
-        return json.load(f)
-
-def save_json(file_path, data):
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=2)
+FILES_TO_SEND = [
+    "Launcher.xlsm",
+    "installer_lifetime.exe"
+]
 
 @app.route("/generate", methods=["POST"])
 def generate_license():
@@ -36,91 +22,85 @@ def generate_license():
     if not machine_id or not program_id:
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
-    if program_id != PROGRAM_ID:
-        return jsonify({"valid": False, "reason": "Invalid program_id"}), 403
+    # Load allowed and rejected lists
+    allowed = load_json(DATA_FILE)
+    rejected = load_json(REJECTED_FILE)
 
-    allowed_ids = load_json(ALLOWED_FILE)
-    if machine_id in allowed_ids:
-        license_data = {
-            "program": program_id,
-            "machine_id": machine_id,
-            "license": "Licensed XLSM Tool — Lifetime Access"
-        }
-        return jsonify({
-            "valid": True,
-            "license": license_data,
-            "files": [
-                "Launcher.xlsm",
-                "installer_lifetime.exe",
-                f"QTY_Network_2025_{machine_id}.xlsm"
-            ]
-        })
+    if machine_id in rejected:
+        return jsonify({"valid": False, "reason": "Rejected"}), 403
 
-    # Add to pending if not already there
-    pending_ids = load_json(PENDING_FILE)
-    if machine_id not in pending_ids:
-        pending_ids.append(machine_id)
-        save_json(PENDING_FILE, pending_ids)
-
-    return jsonify({
-        "valid": False,
-        "reason": "Request not allowed",
-        "status": "pending"
-    }), 403
-
-@app.route("/static/<filename>")
-def download_file(filename):
-    return send_from_directory(STATIC_DIR, filename, as_attachment=True)
+    if machine_id in allowed:
+        license_data = {"machine_id": machine_id, "program_id": program_id}
+        files = FILES_TO_SEND + [f"QTY_Network_2025_{machine_id}.xlsm"]
+        return jsonify({"valid": True, "license": license_data, "files": files})
+    else:
+        # Add to pending if not already there
+        pending = load_json(PENDING_FILE)
+        if machine_id not in pending:
+            pending.append(machine_id)
+            save_json(PENDING_FILE, pending)
+        return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
 @app.route("/admin", methods=["GET", "POST"])
-def admin():
-    pending_ids = load_json(PENDING_FILE)
-    approved_ids = load_json(ALLOWED_FILE)
-    rejected_ids = load_json(REJECTED_FILE)
+def admin_panel():
+    pending = load_json(PENDING_FILE)
+    allowed = load_json(DATA_FILE)
+    rejected = load_json(REJECTED_FILE)
 
     if request.method == "POST":
         action = request.form.get("action")
         machine_id = request.form.get("machine_id")
 
         if action == "approve":
-            if machine_id not in approved_ids:
-                approved_ids.append(machine_id)
-            if machine_id in pending_ids:
-                pending_ids.remove(machine_id)
+            if machine_id not in allowed:
+                allowed.append(machine_id)
+                save_json(DATA_FILE, allowed)
+            pending = [id for id in pending if id != machine_id]
+            save_json(PENDING_FILE, pending)
         elif action == "reject":
-            if machine_id not in rejected_ids:
-                rejected_ids.append(machine_id)
-            if machine_id in pending_ids:
-                pending_ids.remove(machine_id)
+            if machine_id not in rejected:
+                rejected.append(machine_id)
+                save_json(REJECTED_FILE, rejected)
+            pending = [id for id in pending if id != machine_id]
+            save_json(PENDING_FILE, pending)
 
-        save_json(PENDING_FILE, pending_ids)
-        save_json(ALLOWED_FILE, approved_ids)
-        save_json(REJECTED_FILE, rejected_ids)
-
-    # Render HTML admin page
-    html = """
+    return render_template_string("""
     <h1>XLSM Tool License Admin</h1>
     <h2>Pending Machine IDs</h2>
     <ul>
-      {% for mid in pending %}
+    {% for mid in pending %}
         <li>{{ mid }}
-          <form method="post" style="display:inline;">
-            <input type="hidden" name="machine_id" value="{{ mid }}">
-            <button type="submit" name="action" value="approve">Approve</button>
-            <button type="submit" name="action" value="reject">Reject</button>
-          </form>
+            <form method="post" style="display:inline">
+                <input type="hidden" name="machine_id" value="{{ mid }}">
+                <button type="submit" name="action" value="approve">Approve</button>
+                <button type="submit" name="action" value="reject">Reject</button>
+            </form>
         </li>
-      {% endfor %}
+    {% endfor %}
     </ul>
-
     <h2>Approved Machine IDs</h2>
-    <ul>{% for mid in approved %}<li>{{ mid }}</li>{% endfor %}</ul>
-
+    <ul>
+    {% for mid in allowed %}
+        <li>{{ mid }}</li>
+    {% endfor %}
+    </ul>
     <h2>Rejected Machine IDs</h2>
-    <ul>{% for mid in rejected %}<li>{{ mid }}</li>{% endfor %}</ul>
-    """
+    <ul>
+    {% for mid in rejected %}
+        <li>{{ mid }}</li>
+    {% endfor %}
+    </ul>
+    """, pending=pending, allowed=allowed, rejected=rejected)
 
-    return render_template_string(html, pending=pending_ids, approved=approved_ids, rejected=rejected_ids)
+def load_json(path):
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return []
+
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
