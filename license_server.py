@@ -1,153 +1,118 @@
+from flask import Flask, request, jsonify, render_template_string, send_file
 import os
 import json
 import shutil
-from flask import Flask, request, jsonify, send_file, render_template_string, redirect
 
 app = Flask(__name__)
-
 PROGRAM_ID = "xlsm_tool"
-TEMPLATE_FILE = "template.xlsm"
-LICENSE_FOLDER = os.path.expandvars(r"%APPDATA%\DynamoLicense")
-LICENSE_FILE_NAME = "license.txt"
 
-PENDING_FILE = f"pending_ids_{PROGRAM_ID}.json"
+# File paths
 ALLOWED_FILE = f"allowed_ids_{PROGRAM_ID}.json"
+PENDING_FILE = f"pending_ids_{PROGRAM_ID}.json"
+TEMPLATE_FILE = "template.xlsm"
+INSTALLER_FILE = "installer_lifetime.exe"
+LAUNCHER_FILE = "Launcher.xlsm"
 
-DOWNLOAD_FOLDER = "."  # All downloadable files must be in same folder as .exe
+# Ensure JSON storage exists
+for file_path in [ALLOWED_FILE, PENDING_FILE]:
+    if not os.path.exists(file_path):
+        with open(file_path, "w") as f:
+            json.dump([], f)
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin Approval</title>
-</head>
-<body>
-    <h1>Pending Requests for {{ program_id }}</h1>
-    {% for item in pending %}
-        <p>{{ item }} 
-        <a href="/approve?program_id={{ program_id }}&machine_id={{ item }}">✅ Approve</a> | 
-        <a href="/reject?program_id={{ program_id }}&machine_id={{ item }}">❌ Reject</a></p>
-    {% endfor %}
-    
-    <h2>✅ Approved IDs</h2>
-    {% for item in allowed %}
-        <p>{{ item }}</p>
-    {% endfor %}
-</body>
-</html>
-"""
-
-def generate_password(machine_id):
-    seed = 12345
-    for c in machine_id:
-        seed += ord(c)
-    return f"PWD{seed}"
-
-def read_json(file):
-    if not os.path.exists(file):
-        return []
-    with open(file, "r") as f:
+def load_json(path):
+    with open(path, "r") as f:
         return json.load(f)
 
-def write_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=4)
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
 
 @app.route("/generate", methods=["POST"])
-def generate_license():
-    data = request.get_json(force=True)
+def generate():
+    data = request.get_json()
     machine_id = data.get("machine_id")
     program_id = data.get("program_id")
 
     if not machine_id or not program_id:
-        return jsonify({"reason": "Missing machine_id or program_id", "valid": False}), 403
+        return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 403
 
     if program_id != PROGRAM_ID:
-        return jsonify({"reason": "Invalid program ID", "valid": False}), 403
+        return jsonify({"valid": False, "reason": "Invalid program_id"}), 403
 
-    allowed_ids = read_json(ALLOWED_FILE)
-    if machine_id not in allowed_ids:
-        pending = read_json(PENDING_FILE)
-        if machine_id not in pending:
-            pending.append(machine_id)
-            write_json(PENDING_FILE, pending)
-        return jsonify({"reason": "Pending approval", "valid": False}), 403
+    allowed_ids = load_json(ALLOWED_FILE)
+    pending_ids = load_json(PENDING_FILE)
 
-    password = generate_password(machine_id)
-    license_text = f"{machine_id}\n{password}"
+    if machine_id in allowed_ids:
+        license_data = {
+            "machine_id": machine_id,
+            "license": "Licensed XLSM Tool — Lifetime Access"
+        }
+        with open(os.path.expanduser("~\\AppData\\Roaming\\DynamoLicense\\license.txt"), "w") as f:
+            f.write(json.dumps(license_data))
 
-    # Write license file in AppData
-    os.makedirs(LICENSE_FOLDER, exist_ok=True)
-    license_path = os.path.join(LICENSE_FOLDER, LICENSE_FILE_NAME)
-    with open(license_path, "w") as f:
-        f.write(license_text)
+        # Copy template.xlsm and rename
+        new_file = f"QTY_Network_2025_{machine_id}.xlsm"
+        try:
+            shutil.copyfile(TEMPLATE_FILE, new_file)
+        except Exception as e:
+            return jsonify({"valid": False, "reason": str(e)}), 500
 
-    # Generate QTY_Network_2025_[MachineID].xlsm
-    if not os.path.exists(TEMPLATE_FILE):
-        return jsonify({"reason": f"{TEMPLATE_FILE} not found", "valid": False}), 500
+        return jsonify({
+            "valid": True,
+            "files": {
+                "launcher": LAUNCHER_FILE,
+                "installer": INSTALLER_FILE,
+                "xlsm": new_file
+            }
+        })
 
-    output_file = f"QTY_Network_2025_{machine_id}.xlsm"
-    output_path = os.path.join(DOWNLOAD_FOLDER, output_file)
-    shutil.copyfile(TEMPLATE_FILE, output_path)
+    # Not yet approved → add to pending if not already
+    if machine_id not in pending_ids:
+        pending_ids.append(machine_id)
+        save_json(PENDING_FILE, pending_ids)
 
-    return jsonify({
-        "valid": True,
-        "license": license_text,
-        "files": [
-            output_file,
-            "Launcher.xlsm",
-            "installer_lifetime.exe"
-        ]
-    })
+    return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-@app.route("/admin")
+@app.route("/admin", methods=["GET", "POST"])
 def admin():
-    pending = read_json(PENDING_FILE)
-    allowed = read_json(ALLOWED_FILE)
-    return render_template_string(HTML_TEMPLATE, program_id=PROGRAM_ID, pending=pending, allowed=allowed)
+    allowed = load_json(ALLOWED_FILE)
+    pending = load_json(PENDING_FILE)
 
-@app.route("/approve")
-def approve():
-    machine_id = request.args.get("machine_id")
-    program_id = request.args.get("program_id")
+    if request.method == "POST":
+        action = request.form.get("action")
+        machine_id = request.form.get("machine_id")
+        if action == "approve" and machine_id not in allowed:
+            allowed.append(machine_id)
+            save_json(ALLOWED_FILE, allowed)
+            if machine_id in pending:
+                pending.remove(machine_id)
+                save_json(PENDING_FILE, pending)
+        elif action == "reject" and machine_id in pending:
+            pending.remove(machine_id)
+            save_json(PENDING_FILE, pending)
 
-    if program_id != PROGRAM_ID:
-        return redirect("/admin")
-
-    pending = read_json(PENDING_FILE)
-    allowed = read_json(ALLOWED_FILE)
-
-    if machine_id in pending:
-        pending.remove(machine_id)
-        write_json(PENDING_FILE, pending)
-
-    if machine_id not in allowed:
-        allowed.append(machine_id)
-        write_json(ALLOWED_FILE, allowed)
-
-    return redirect("/admin")
-
-@app.route("/reject")
-def reject():
-    machine_id = request.args.get("machine_id")
-    program_id = request.args.get("program_id")
-
-    if program_id != PROGRAM_ID:
-        return redirect("/admin")
-
-    pending = read_json(PENDING_FILE)
-    if machine_id in pending:
-        pending.remove(machine_id)
-        write_json(PENDING_FILE, pending)
-
-    return redirect("/admin")
+    html = """<!DOCTYPE html><html><body>
+    <h2>Pending Approvals</h2>
+    {% for mid in pending %}
+        <form method='post'>
+            <input type='hidden' name='machine_id' value='{{ mid }}'>
+            {{ mid }}
+            <button name='action' value='approve'>Approve</button>
+            <button name='action' value='reject'>Reject</button>
+        </form>
+    {% endfor %}
+    <h2>Approved Machine IDs</h2>
+    <ul>
+    {% for mid in allowed %}
+        <li>{{ mid }}</li>
+    {% endfor %}
+    </ul></body></html>
+    """
+    return render_template_string(html, pending=pending, allowed=allowed)
 
 @app.route("/download/<filename>")
-def download_file(filename):
-    path = os.path.join(DOWNLOAD_FOLDER, filename)
-    if os.path.exists(path):
-        return send_file(path, as_attachment=True)
-    return f"File {filename} not found", 404
+def download(filename):
+    return send_file(filename, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000, debug=True)
+    app.run(host="0.0.0.0", port=10000)
