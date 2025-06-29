@@ -5,147 +5,128 @@ import shutil
 
 app = Flask(__name__)
 
-# Configuration
-PROGRAM_ID = "xlsm_tool"
-TEMPLATE_FILENAME = "template.xlsm"
+# File paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ALLOWED_FILE = os.path.join(BASE_DIR, "allowed_ids_xlsm_tool.json")
+PENDING_FILE = os.path.join(BASE_DIR, "pending_ids_xlsm_tool.json")
+REJECTED_FILE = os.path.join(BASE_DIR, "rejected_ids_xlsm_tool.json")
+LICENSE_TEMPLATE = os.path.join(BASE_DIR, "license.txt")
+TEMPLATE_XLSM = os.path.join(BASE_DIR, "template.xlsm")
 
-# JSON file paths
-ALLOWED_IDS_FILE = f"allowed_ids_{PROGRAM_ID}.json"
-PENDING_IDS_FILE = f"pending_ids_{PROGRAM_ID}.json"
-REJECTED_IDS_FILE = f"rejected_ids_{PROGRAM_ID}.json"
-
-# Web admin HTML
-ADMIN_TEMPLATE = """
-<h1>XLSM Tool License Admin</h1>
-<h2>Pending Machine IDs</h2>
-<ul>
-{% for mid in pending %}
-  <li>{{ mid }}
-    <form method="post" action="/admin/approve" style="display:inline;">
-      <input type="hidden" name="machine_id" value="{{ mid }}">
-      <button type="submit">Approve</button>
-    </form>
-    <form method="post" action="/admin/reject" style="display:inline;">
-      <input type="hidden" name="machine_id" value="{{ mid }}">
-      <button type="submit">Reject</button>
-    </form>
-  </li>
-{% endfor %}
-</ul>
-
-<h2>Approved Machine IDs</h2>
-<ul>{% for mid in approved %}<li>{{ mid }}</li>{% endfor %}</ul>
-
-<h2>Rejected Machine IDs</h2>
-<ul>{% for mid in rejected %}<li>{{ mid }}</li>{% endfor %}</ul>
-"""
-
-# Utilities
-def load_json(file):
-    if not os.path.exists(file):
-        return []
-    with open(file, "r") as f:
-        return json.load(f)
-
-def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
-
-def ensure_file(filename):
-    if not os.path.exists(filename):
-        with open(filename, "w") as f:
+# Ensure files exist
+for path in [ALLOWED_FILE, PENDING_FILE, REJECTED_FILE]:
+    if not os.path.exists(path):
+        with open(path, "w") as f:
             json.dump([], f)
 
-# API
 @app.route("/generate", methods=["POST"])
 def generate_license():
-    machine_id = request.json.get("machine_id")
-    program_id = request.json.get("program_id")
-    if program_id != PROGRAM_ID or not machine_id:
-        return jsonify({"valid": False, "reason": "Invalid program or ID"}), 403
+    data = request.get_json()
+    machine_id = data.get("machine_id")
+    program_id = data.get("program_id")
 
-    allowed = load_json(ALLOWED_IDS_FILE)
-    pending = load_json(PENDING_IDS_FILE)
-    rejected = load_json(REJECTED_IDS_FILE)
+    if program_id != "xlsm_tool":
+        return jsonify({"valid": False, "reason": "Invalid program"}), 403
 
-    if machine_id in rejected:
+    # Load lists
+    with open(ALLOWED_FILE) as f:
+        allowed_ids = json.load(f)
+    with open(REJECTED_FILE) as f:
+        rejected_ids = json.load(f)
+    with open(PENDING_FILE) as f:
+        pending_ids = json.load(f)
+
+    if machine_id in allowed_ids:
+        return send_file(LICENSE_TEMPLATE)
+    elif machine_id in rejected_ids:
         return jsonify({"valid": False, "reason": "Rejected"}), 403
-
-    if machine_id not in allowed:
-        if machine_id not in pending:
-            pending.append(machine_id)
-            save_json(PENDING_IDS_FILE, pending)
-        return jsonify({"valid": False, "reason": "Not approved yet"}), 403
-
-    # License content
-    license_content = {
-        "machine_id": machine_id,
-        "program_id": program_id
-    }
-    with open("license.txt", "w") as f:
-        f.write(json.dumps(license_content))
-
-    return send_file("license.txt", as_attachment=True)
+    elif machine_id not in pending_ids:
+        pending_ids.append(machine_id)
+        with open(PENDING_FILE, "w") as f:
+            json.dump(pending_ids, f)
+    return jsonify({"valid": False, "reason": "Not approved yet"}), 403
 
 @app.route("/download/<filename>")
 def download_file(filename):
-    if filename.lower() == "launcher.xlsm" and os.path.exists("Launcher.xlsm"):
-        return send_file("Launcher.xlsm", as_attachment=True)
+    file_path = os.path.join(BASE_DIR, filename)
+    if os.path.exists(file_path):
+        return send_file(file_path)
+    else:
+        return "File not found", 404
 
-    if filename.lower() == "installer_lifetime.exe" and os.path.exists("installer_lifetime.exe"):
-        return send_file("installer_lifetime.exe", as_attachment=True)
+@app.route("/admin")
+def admin_page():
+    with open(PENDING_FILE) as f:
+        pending_ids = json.load(f)
+    with open(ALLOWED_FILE) as f:
+        approved_ids = json.load(f)
+    with open(REJECTED_FILE) as f:
+        rejected_ids = json.load(f)
 
-    if filename.startswith("QTY_Network_2025_") and filename.endswith(".xlsm"):
-        if not os.path.exists(filename):
-            if not os.path.exists(TEMPLATE_FILENAME):
-                return "Template not found", 404
-            shutil.copyfile(TEMPLATE_FILENAME, filename)
-        return send_file(filename, as_attachment=True)
+    html = """
+    <h1>XLSM Tool License Admin</h1>
 
-    return "File not found", 404
+    <h2>Pending Machine IDs</h2>
+    {% for mid in pending %}
+        <li>{{ mid }} 
+        <a href="/approve/{{ mid }}">✅ Approve</a> 
+        <a href="/reject/{{ mid }}">❌ Reject</a></li>
+    {% endfor %}
 
-@app.route("/admin", methods=["GET"])
-def admin():
-    ensure_file(PENDING_IDS_FILE)
-    ensure_file(ALLOWED_IDS_FILE)
-    ensure_file(REJECTED_IDS_FILE)
+    <h2>Approved Machine IDs</h2>
+    {% for mid in approved %}
+        <li>{{ mid }}</li>
+    {% endfor %}
 
-    return render_template_string(
-        ADMIN_TEMPLATE,
-        pending=load_json(PENDING_IDS_FILE),
-        approved=load_json(ALLOWED_IDS_FILE),
-        rejected=load_json(REJECTED_IDS_FILE)
-    )
+    <h2>Rejected Machine IDs</h2>
+    {% for mid in rejected %}
+        <li>{{ mid }}</li>
+    {% endfor %}
+    """
+    return render_template_string(html, pending=pending_ids, approved=approved_ids, rejected=rejected_ids)
 
-@app.route("/admin/approve", methods=["POST"])
-def approve():
-    mid = request.form["machine_id"]
-    allowed = load_json(ALLOWED_IDS_FILE)
-    pending = load_json(PENDING_IDS_FILE)
+@app.route("/approve/<machine_id>")
+def approve(machine_id):
+    with open(PENDING_FILE) as f:
+        pending_ids = json.load(f)
+    with open(ALLOWED_FILE) as f:
+        allowed_ids = json.load(f)
 
-    if mid not in allowed:
-        allowed.append(mid)
-    if mid in pending:
-        pending.remove(mid)
+    if machine_id in pending_ids:
+        pending_ids.remove(machine_id)
+        if machine_id not in allowed_ids:
+            allowed_ids.append(machine_id)
 
-    save_json(ALLOWED_IDS_FILE, allowed)
-    save_json(PENDING_IDS_FILE, pending)
-    return admin()
+        with open(PENDING_FILE, "w") as f:
+            json.dump(pending_ids, f)
+        with open(ALLOWED_FILE, "w") as f:
+            json.dump(allowed_ids, f)
 
-@app.route("/admin/reject", methods=["POST"])
-def reject():
-    mid = request.form["machine_id"]
-    rejected = load_json(REJECTED_IDS_FILE)
-    pending = load_json(PENDING_IDS_FILE)
+        # Copy template to custom XLSM
+        output_path = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
+        if os.path.exists(TEMPLATE_XLSM):
+            shutil.copyfile(TEMPLATE_XLSM, output_path)
 
-    if mid not in rejected:
-        rejected.append(mid)
-    if mid in pending:
-        pending.remove(mid)
+    return "✅ Approved."
 
-    save_json(REJECTED_IDS_FILE, rejected)
-    save_json(PENDING_IDS_FILE, pending)
-    return admin()
+@app.route("/reject/<machine_id>")
+def reject(machine_id):
+    with open(PENDING_FILE) as f:
+        pending_ids = json.load(f)
+    with open(REJECTED_FILE) as f:
+        rejected_ids = json.load(f)
+
+    if machine_id in pending_ids:
+        pending_ids.remove(machine_id)
+        if machine_id not in rejected_ids:
+            rejected_ids.append(machine_id)
+
+        with open(PENDING_FILE, "w") as f:
+            json.dump(pending_ids, f)
+        with open(REJECTED_FILE, "w") as f:
+            json.dump(rejected_ids, f)
+
+    return "❌ Rejected."
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True, port=10000)
