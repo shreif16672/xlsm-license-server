@@ -1,5 +1,3 @@
-# license_server.py — FINAL version with xlwings and correct Drive Serial logic
-
 import os
 import json
 import shutil
