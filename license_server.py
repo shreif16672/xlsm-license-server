@@ -1,12 +1,12 @@
-# license_server.py — FINAL version (writes machine ID and password to hidden sheet)
+# license_server.py — FINAL version with xlwings and correct Drive Serial logic
 
 import os
 import json
 import shutil
+import subprocess
 import time
-import uuid
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
-from openpyxl import load_workbook
+import xlwings as xw
 
 app = Flask(__name__)
 
@@ -25,12 +25,20 @@ JSON_PATHS = {
     "rejected": os.path.join(BASE_DIR, f"rejected_ids_{PROGRAM_ID}.json"),
 }
 
-# Create needed files
 os.makedirs(BASE_DIR, exist_ok=True)
 for path in JSON_PATHS.values():
     if not os.path.exists(path):
         with open(path, "w") as f:
             json.dump([], f)
+
+def get_drive_serial():
+    try:
+        output = subprocess.check_output('vol C:', shell=True, text=True)
+        for line in output.splitlines():
+            if "Serial Number is" in line:
+                return line.strip().split("is")[-1].strip().replace("-", "")
+    except Exception as e:
+        return "UNKNOWN"
 
 def generate_password(machine_id):
     seed = 12345
@@ -68,23 +76,26 @@ def generate_license():
             save_json(JSON_PATHS["pending"], pending)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
-    # Create personalized file
+    # Create licensed .xlsm
     target_file = os.path.join(BASE_DIR, f"QTY_Network_2025_{machine_id}.xlsm")
     if not os.path.exists(target_file):
         shutil.copyfile(TEMPLATE_XLSM, target_file)
 
-        # Write license inside XLSM file
         try:
-            wb = load_workbook(filename=target_file, keep_vba=True)
-            if "LicenseData" not in wb.sheetnames:
-                ws = wb.create_sheet("LicenseData")
-            else:
-                ws = wb["LicenseData"]
-            ws["A1"] = machine_id
-            ws["A2"] = generate_password(machine_id)
-            wb.save(target_file)
+            app_xl = xw.App(visible=False)
+            wb = app_xl.books.open(target_file)
+            try:
+                sheet = wb.sheets["LicenseData"]
+            except:
+                sheet = wb.sheets.add(name="LicenseData", after=wb.sheets[-1])
+            sheet["A1"].value = machine_id
+            sheet["A2"].value = generate_password(machine_id)
+            sheet.api.Visible = 2  # xlSheetVeryHidden
+            wb.save()
+            wb.close()
+            app_xl.quit()
         except Exception as e:
-            return jsonify({"valid": False, "reason": f"Failed to write license: {str(e)}"}), 500
+            return jsonify({"valid": False, "reason": f"Excel write error: {e}"}), 500
 
     return jsonify({
         "valid": True,
@@ -103,7 +114,7 @@ def admin_panel():
     rejected = load_json(JSON_PATHS["rejected"])
     html = """
     <h1>Admin Panel — XLSM Tool</h1>
-    <h2>Pending IDs</h2>
+    <h2>Pending</h2>
     <ul>{% for mid in pending %}
         <li>{{ mid }} <a href="/admin/approve/{{ mid }}">✅ Approve</a> | <a href="/admin/reject/{{ mid }}">❌ Reject</a></li>
     {% endfor %}</ul>
