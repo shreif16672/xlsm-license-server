@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify, send_from_directory, render_template_
 
 app = Flask(__name__)
 PROGRAM_ID = "xlsm_tool"
-TEMPLATE_FILE = "laptop.xlsm"
+TEMPLATE_FILE = "template.xlsm"
 LICENSE_FOLDER = "./"
 
 def get_file_path(file):
