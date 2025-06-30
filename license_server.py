@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 import time
-
+print("🚀 Flask license server is starting... [VERSION: 2025-06-30]")
 app = Flask(__name__)
 
 DATA_DIR = "."
