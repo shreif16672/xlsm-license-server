@@ -28,12 +28,19 @@ def save_json(path, data):
 
 @app.route("/request_license", methods=["POST"])
 def request_license():
-    data = request.get_json()
+    try:
+        data = request.get_json(force=True)
+    except Exception as e:
+        print(f"❌ JSON parse error: {e}")
+        return jsonify({"valid": False, "reason": "Invalid JSON"}), 400
+
     machine_id = data.get("machine_id")
     program_id = data.get("program_id")
-    print(f"📥 Received request from machine_id: {machine_id}, program_id: {program_id}")  # NEW LINE
-    
+
+    print(f"📥 Received request: {data}")  # Debug log
+
     if not machine_id or not program_id or program_id not in FILES:
+        print("❌ Rejected: Missing or invalid machine_id or program_id")
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
     # TEMP: Always approve this one machine ID for testing
