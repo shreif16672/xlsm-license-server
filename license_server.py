@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 import time
-print("🚀 Flask license server is starting... [VERSION: 2025-06-30]")
+
 app = Flask(__name__)
 
 DATA_DIR = "."
@@ -22,7 +22,7 @@ def load_json(path):
     return json.load(open(path)) if os.path.exists(path) else []
 
 def save_json(path, data):
-    print(f"💾 Saving to: {os.path.abspath(path)}")  # ADD THIS LINE
+    print(f"💾 Saving to: {os.path.abspath(path)}")
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -37,22 +37,31 @@ def request_license():
     machine_id = data.get("machine_id")
     program_id = data.get("program_id")
 
-    print(f"📥 Received request: {data}")  # Debug log
+    print(f"📥 Received request: {data}")
 
     if not machine_id or not program_id or program_id not in FILES:
         print("❌ Rejected: Missing or invalid machine_id or program_id")
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
-    # TEMP: Always approve this one machine ID for testing
-    if machine_id == "1156439610":
+    f = FILES[program_id]
+    allowed = load_json(f["allowed"])
+    pending = load_json(f["pending"])
+
+    if machine_id in allowed:
         xlsm_name = f"QTY_Network_2025_{machine_id}.xlsm"
         xlsm_path = os.path.join(DATA_DIR, xlsm_name)
         if not os.path.exists(xlsm_path):
-            shutil.copyfile(FILES[program_id]["template"], xlsm_path)
+            shutil.copyfile(f["template"], xlsm_path)
+
+        timeout = 10
+        while not os.path.exists(xlsm_path) and timeout > 0:
+            time.sleep(1)
+            timeout -= 1
+
         return jsonify({
             "valid": True,
             "machine_id": machine_id,
-            "launcher_url": f"https://xlsm-license-server.onrender.com/download/Launcher.xlsm",
+            "launcher_url": f"https://xlsm-license-server.onrender.com/download/{f['launcher']}",
             "xlsm_url": f"https://xlsm-license-server.onrender.com/download/{xlsm_name}"
         })
     else:
@@ -114,4 +123,5 @@ def reject(program, machine_id):
     return f"❌ Rejected {machine_id} for {program}. <a href='/admin/{program}'>Back</a>"
 
 if __name__ == "__main__":
+    print("🚀 Flask license server is starting... [VERSION: 2025-06-30]")
     app.run(host="0.0.0.0", port=10000)
