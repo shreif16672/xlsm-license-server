@@ -34,9 +34,10 @@ def generate_license():
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
     allowed_ids = load_json(ALLOWED_IDS_FILE)
-      print(f"Received machine_id: {machine_id}")
-      print(f"Allowed: {allowed_ids}")
+      
     if machine_id not in allowed_ids:
+        print(f"Received machine_id: {machine_id}")
+        print(f"Allowed: {allowed_ids}")
         # Add to pending list if not already there
         pending = load_json(PENDING_IDS_FILE)
         if machine_id not in pending:
