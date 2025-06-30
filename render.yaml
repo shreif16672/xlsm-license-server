@@ -5,3 +5,7 @@ services:
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python license_server.py"
     autoDeploy: true
+    disk:
+      name: license-storage
+      mountPath: /mnt/data
+      sizeGB: 1

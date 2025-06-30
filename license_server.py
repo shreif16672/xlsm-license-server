@@ -6,15 +6,15 @@ import time
 
 app = Flask(__name__)
 
-DATA_DIR = "."
+DISK_PATH = "/mnt/data"
 PROGRAM_ID = "xlsm_tool"
 
 FILES = {
     "xlsm_tool": {
         "template": "template.xlsm",
         "launcher": "Launcher.xlsm",
-        "allowed": "allowed_ids_xlsm_tool.json",
-        "pending": "pending_ids_xlsm_tool.json"
+        "allowed": os.path.join(DISK_PATH, "allowed_ids_xlsm_tool.json"),
+        "pending": os.path.join(DISK_PATH, "pending_ids_xlsm_tool.json")
     }
 }
 
@@ -38,9 +38,8 @@ def request_license():
     program_id = data.get("program_id")
 
     print(f"📥 Received request: {data}")
-        
+
     if not machine_id or not program_id or program_id not in FILES:
-        print("❌ Rejected: Missing or invalid machine_id or program_id")
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
     f = FILES[program_id]
@@ -49,7 +48,7 @@ def request_license():
 
     if machine_id in allowed:
         xlsm_name = f"QTY_Network_2025_{machine_id}.xlsm"
-        xlsm_path = os.path.join(DATA_DIR, xlsm_name)
+        xlsm_path = os.path.join(DISK_PATH, xlsm_name)
         if not os.path.exists(xlsm_path):
             shutil.copyfile(f["template"], xlsm_path)
 
@@ -72,7 +71,9 @@ def request_license():
 
 @app.route("/download/<path:filename>")
 def download_file(filename):
-    return send_from_directory(DATA_DIR, filename, as_attachment=True)
+    if filename.startswith("QTY_Network_2025_"):
+        return send_from_directory(DISK_PATH, filename, as_attachment=True)
+    return send_from_directory(".", filename, as_attachment=True)
 
 @app.route("/admin/<program>")
 def admin_view(program):
@@ -123,5 +124,5 @@ def reject(program, machine_id):
     return f"❌ Rejected {machine_id} for {program}. <a href='/admin/{program}'>Back</a>"
 
 if __name__ == "__main__":
-    print("🚀 Flask license server is starting... [VERSION: 2025-06-30]")
+    print("🚀 Flask license server is starting... [VERSION: FINAL - RENDER DISK]")
     app.run(host="0.0.0.0", port=10000)
