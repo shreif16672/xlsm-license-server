@@ -2,10 +2,6 @@ services:
   - type: web
     name: xlsm-license-server
     env: python
-    plan: starter
-    buildCommand: ""
-    startCommand: python license_server.py
-    disk:
-      name: data-disk
-      mountPath: /mnt/data
-      sizeGB: 1
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python license_server.py"
+    autoDeploy: true
