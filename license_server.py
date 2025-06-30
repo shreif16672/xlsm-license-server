@@ -22,6 +22,7 @@ def load_json(path):
     return json.load(open(path)) if os.path.exists(path) else []
 
 def save_json(path, data):
+    print(f"💾 Saving to: {os.path.abspath(path)}")  # ADD THIS LINE
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
