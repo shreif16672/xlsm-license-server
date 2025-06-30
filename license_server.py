@@ -38,7 +38,8 @@ def request_license():
     program_id = data.get("program_id")
 
     print(f"📥 Received request: {data}")
-
+    return jsonify({"valid": False, "reason": "⚠️ TEST BLOCK"}), 403
+    
     if not machine_id or not program_id or program_id not in FILES:
         print("❌ Rejected: Missing or invalid machine_id or program_id")
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
