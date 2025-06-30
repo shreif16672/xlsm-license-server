@@ -31,7 +31,8 @@ def request_license():
     data = request.get_json()
     machine_id = data.get("machine_id")
     program_id = data.get("program_id")
-
+    print(f"📥 Received request from machine_id: {machine_id}, program_id: {program_id}")  # NEW LINE
+    
     if not machine_id or not program_id or program_id not in FILES:
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
