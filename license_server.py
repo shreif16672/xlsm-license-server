@@ -1,129 +1,139 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
 import os
 import json
 import shutil
 import time
+from flask import Flask, request, jsonify, send_file, render_template_string
 
 app = Flask(__name__)
 
 PROGRAM_ID = "xlsm_tool"
-DATA_DIR = "."
+DATA_FOLDER = "."
+TEMPLATE_FILE = "template.xlsm"
 
-# ---------------- PATHS ----------------
-ALLOWED_FILE = f"allowed_ids_{PROGRAM_ID}.json"
-PENDING_FILE = f"pending_ids_{PROGRAM_ID}.json"
-TEMPLATE_XLSM = "template.xlsm"
-FILES_DIR = "."
+# File paths
+allowed_path = os.path.join(DATA_FOLDER, f"allowed_ids_{PROGRAM_ID}.json")
+pending_path = os.path.join(DATA_FOLDER, f"pending_ids_{PROGRAM_ID}.json")
 
-# ------------- UTILITIES --------------
-def load_json(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return []
+# Ensure JSON files exist
+for path in [allowed_path, pending_path]:
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump([], f)
 
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+# HTML template for admin panel
+HTML_TEMPLATE = """
+<h2>✅ Approved Machine IDs</h2>
+<ul>
+{% for mid in approved %}
+  <li>{{ mid }}</li>
+{% endfor %}
+</ul>
 
-def calculate_password(machine_id):
-    return "PWD" + str(int(machine_id) % 9999 + 12345)
+<h2>🕒 Pending Machine IDs</h2>
+<ul>
+{% for mid in pending %}
+  <li>
+    {{ mid }}
+    <a href="/approve/{{ mid }}">[Approve]</a>
+    <a href="/reject/{{ mid }}">[Reject]</a>
+  </li>
+{% endfor %}
+</ul>
+"""
 
-def generate_xlsm(machine_id):
-    output_file = f"QTY_Network_2025_{machine_id}.xlsm"
-    output_path = os.path.join(FILES_DIR, output_file)
-    if not os.path.exists(output_path):
-        shutil.copyfile(TEMPLATE_XLSM, output_path)
-        time.sleep(1)  # Ensure it's written
-    return output_file
-
-# ----------- LICENSE ENDPOINT ----------
 @app.route("/generate", methods=["POST"])
-def generate():
-    data = request.json
+def generate_license():
+    data = request.get_json()
     machine_id = data.get("machine_id")
     program_id = data.get("program_id")
 
-    if not machine_id or not program_id:
+    if program_id != PROGRAM_ID or not machine_id:
         return jsonify({"valid": False, "reason": "Missing machine_id or program_id"}), 400
 
-    if program_id != PROGRAM_ID:
-        return jsonify({"valid": False, "reason": "Invalid program"}), 403
+    # Load allowed and pending
+    with open(allowed_path, "r") as f:
+        allowed_ids = json.load(f)
 
-    allowed = load_json(ALLOWED_FILE)
-    pending = load_json(PENDING_FILE)
+    with open(pending_path, "r") as f:
+        pending_ids = json.load(f)
 
-    if machine_id in allowed:
-        password = calculate_password(machine_id)
-        xlsm_file = generate_xlsm(machine_id)
-        return jsonify({
-            "valid": True,
-            "license": f"{machine_id}\n{password}",
-            "download_files": ["Launcher.xlsm", "installer_lifetime.exe", xlsm_file]
-        })
+    if machine_id not in allowed_ids:
+        if machine_id not in pending_ids:
+            pending_ids.append(machine_id)
+            with open(pending_path, "w") as f:
+                json.dump(pending_ids, f)
+        return jsonify({"valid": False, "reason": "Pending approval"})
 
-    if machine_id not in pending:
-        pending.append(machine_id)
-        save_json(PENDING_FILE, pending)
+    # Prepare license content
+    ascii_sum = sum(ord(c) for c in machine_id)
+    password = f"PWD{12800 + (ascii_sum % 100)}"
+    license_text = f"{machine_id}\n{password}"
 
-    return jsonify({"valid": False, "reason": "Pending approval"})
+    license_dir = os.path.join(os.getenv("APPDATA", "/tmp"), "DynamoLicense")
+    os.makedirs(license_dir, exist_ok=True)
+    license_path = os.path.join(license_dir, "license.txt")
+    with open(license_path, "w") as f:
+        f.write(license_text)
 
-# ----------- FILE DOWNLOAD -------------
-@app.route("/files/<path:filename>")
+    # Create XLSM file dynamically
+    output_filename = f"QTY_Network_2025_{machine_id}.xlsm"
+    output_path = os.path.join(DATA_FOLDER, output_filename)
+    if not os.path.exists(output_path):
+        shutil.copy(TEMPLATE_FILE, output_path)
+        time.sleep(1)  # Ensure file write completes
+
+    return jsonify({
+        "valid": True,
+        "license": license_text,
+        "files": {
+            "license": "license.txt",
+            "xlsm": output_filename,
+            "launcher": "Launcher.xlsm"
+        }
+    })
+
+@app.route("/download/<filename>")
 def download_file(filename):
-    return send_from_directory(FILES_DIR, filename)
+    return send_file(os.path.join(DATA_FOLDER, filename), as_attachment=True)
 
-# ----------- ADMIN PANEL ---------------
-@app.route("/admin/xlsm_tool")
+@app.route("/admin")
 def admin_panel():
-    allowed = load_json(ALLOWED_FILE)
-    pending = load_json(PENDING_FILE)
+    with open(allowed_path, "r") as f:
+        approved = json.load(f)
+    with open(pending_path, "r") as f:
+        pending = json.load(f)
+    return render_template_string(HTML_TEMPLATE, approved=approved, pending=pending)
 
-    html = """
-    <h1>🔐 XLSM TOOL LICENSE ADMIN</h1>
-    <h2>Pending Approvals:</h2>
-    {% for id in pending %}
-        <form method="post" action="/admin/xlsm_tool/approve">
-            <input type="hidden" name="machine_id" value="{{ id }}">
-            <button type="submit">✅ Approve {{ id }}</button>
-        </form>
-        <form method="post" action="/admin/xlsm_tool/reject">
-            <input type="hidden" name="machine_id" value="{{ id }}">
-            <button type="submit">❌ Reject {{ id }}</button>
-        </form>
-        <hr>
-    {% endfor %}
-    <h2>Approved IDs:</h2>
-    <ul>
-    {% for id in allowed %}
-        <li>{{ id }}</li>
-    {% endfor %}
-    </ul>
-    """
-    return render_template_string(html, pending=pending, allowed=allowed)
+@app.route("/approve/<machine_id>")
+def approve(machine_id):
+    with open(allowed_path, "r") as f:
+        allowed = json.load(f)
+    with open(pending_path, "r") as f:
+        pending = json.load(f)
 
-@app.route("/admin/xlsm_tool/approve", methods=["POST"])
-def approve():
-    machine_id = request.form.get("machine_id")
-    allowed = load_json(ALLOWED_FILE)
-    pending = load_json(PENDING_FILE)
-    if machine_id and machine_id not in allowed:
+    if machine_id not in allowed:
         allowed.append(machine_id)
-        save_json(ALLOWED_FILE, allowed)
+        with open(allowed_path, "w") as f:
+            json.dump(allowed, f)
+
     if machine_id in pending:
         pending.remove(machine_id)
-        save_json(PENDING_FILE, pending)
-    return "✅ Approved. <a href='/admin/xlsm_tool'>Back</a>"
+        with open(pending_path, "w") as f:
+            json.dump(pending, f)
 
-@app.route("/admin/xlsm_tool/reject", methods=["POST"])
-def reject():
-    machine_id = request.form.get("machine_id")
-    pending = load_json(PENDING_FILE)
+    return "✅ Approved. <a href='/admin'>Back</a>"
+
+@app.route("/reject/<machine_id>")
+def reject(machine_id):
+    with open(pending_path, "r") as f:
+        pending = json.load(f)
+
     if machine_id in pending:
         pending.remove(machine_id)
-        save_json(PENDING_FILE, pending)
-    return "❌ Rejected. <a href='/admin/xlsm_tool'>Back</a>"
+        with open(pending_path, "w") as f:
+            json.dump(pending, f)
 
-# ---------- MAIN RUNNER ---------------
+    return "❌ Rejected. <a href='/admin'>Back</a>"
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
