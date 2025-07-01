@@ -98,7 +98,6 @@ def request_license():
         shutil.copy(TEMPLATE_FILE, new_path)
         print(f"[INFO] Created file: {new_path}")
 
-    # Wait until file is created
     for _ in range(10):
         if os.path.exists(new_path):
             break
