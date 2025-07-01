@@ -3,7 +3,6 @@ import json
 import time
 import shutil
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
-from openpyxl import load_workbook
 
 app = Flask(__name__)
 
@@ -18,7 +17,6 @@ PENDING_IDS_FILE = os.path.join(DATA_FOLDER, f"pending_ids_{PROGRAM_ID}.json")
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# Ensure allowed and pending ID files exist
 for file_path in [ALLOWED_IDS_FILE, PENDING_IDS_FILE]:
     if not os.path.exists(file_path):
         with open(file_path, 'w') as f:
@@ -72,20 +70,14 @@ def request_license():
 
     if program_id != PROGRAM_ID:
         return jsonify({"valid": False, "reason": "Invalid program ID"}), 403
-
     if not machine_id:
         return jsonify({"valid": False, "reason": "Missing machine ID"}), 400
-
-    print(f"[INFO] Received request: {data}")
 
     if not is_allowed(machine_id):
         add_to_pending(machine_id)
         return jsonify({"valid": False, "reason": "Pending approval"}), 403
 
     password = generate_password(machine_id)
-    if not password:
-        return jsonify({"valid": False, "reason": "License password generation failed"}), 500
-
     license_text = f"{machine_id}\n{password}"
     license_path = os.path.join(DOWNLOAD_FOLDER, "license.txt")
     with open(license_path, 'w') as f:
@@ -93,12 +85,10 @@ def request_license():
 
     new_file = f"QTY_Network_2025_{machine_id}.xlsm"
     new_path = os.path.join(DOWNLOAD_FOLDER, new_file)
-
     if not os.path.exists(new_path):
         shutil.copy(TEMPLATE_FILE, new_path)
-        print(f"[INFO] Created file: {new_path}")
+        print(f"[INFO] Created: {new_path}")
 
-    # Wait until file is created
     for _ in range(10):
         if os.path.exists(new_path):
             break
@@ -106,9 +96,9 @@ def request_license():
 
     return jsonify({
         "valid": True,
-        "license_url": f"/download/license.txt",
+        "license_url": "/download/license.txt",
         "xlsm_url": f"/download/{new_file}",
-        "launcher_url": f"/download/Launcher.xlsm",
+        "launcher_url": "/download/Launcher.xlsm",
         "license": license_text
     })
 
@@ -151,5 +141,5 @@ def reject(machine_id):
     return f"Rejected {machine_id}. <a href='/admin/xlsm_tool'>Back</a>"
 
 if __name__ == '__main__':
-    print("\U0001F680 Flask license server is starting... [VERSION: 2025-07-01]")
+    print("🚀 XLSM License Server running on port 10000")
     app.run(host='0.0.0.0', port=10000)
