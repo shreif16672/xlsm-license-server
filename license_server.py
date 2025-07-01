@@ -56,11 +56,15 @@ def move_to_allowed(machine_id):
 
 def generate_password(machine_id):
     try:
-        # Match VBA: GeneratePassword = "PWD" & (CLng(MachineID) Mod 100000)
+        # Try numeric first
         return f"PWD{int(machine_id) % 100000}"
-    except Exception as e:
-        print(f"[ERROR] Password generation failed: {e}")
-        return None
+    except:
+        try:
+            # Try hex (last 8 chars as hex)
+            return f"PWD{int(machine_id[-8:], 16) % 100000}"
+        except Exception as e:
+            print(f"[ERROR] Password generation failed: {e}")
+            return None
 
 @app.route("/request_license", methods=["POST"])
 def request_license():
