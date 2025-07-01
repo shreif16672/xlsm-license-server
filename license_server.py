@@ -3,6 +3,7 @@ import json
 import time
 import shutil
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from openpyxl import load_workbook
 
 app = Flask(__name__)
 
@@ -107,7 +108,8 @@ def request_license():
         "valid": True,
         "license_url": f"/download/license.txt",
         "xlsm_url": f"/download/{new_file}",
-        "launcher_url": f"/download/Launcher.xlsm"
+        "launcher_url": f"/download/Launcher.xlsm",
+        "license": license_text
     })
 
 @app.route("/download/<path:filename>")
