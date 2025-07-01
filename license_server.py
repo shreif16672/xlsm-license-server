@@ -105,9 +105,9 @@ def request_license():
 
     return jsonify({
         "valid": True,
-        "license_url": f"/download/license.txt",
-        "xlsm_url": f"/download/{new_file}",
-        "launcher_url": f"/download/Launcher.xlsm",
+        "license_url": "/download/license.txt",
+        "xlsm_url": "/download/QTY_Network_2025_EE0FFC25.xlsm",
+        "launcher_url": "/download/Launcher.xlsm",
         "license": license_text
     })
 
