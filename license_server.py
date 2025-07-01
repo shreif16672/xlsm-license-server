@@ -57,8 +57,8 @@ def move_to_allowed(machine_id):
 def generate_password(machine_id):
     try:
         seed = 12345
-        for char in machine_id:
-            seed += ord(char)
+        for i in range(len(machine_id)):
+            seed += ord(machine_id[i])
         return f"PWD{seed}"
     except Exception as e:
         print(f"[ERROR] Password generation failed: {e}")
