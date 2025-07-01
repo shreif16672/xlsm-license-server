@@ -109,7 +109,6 @@ def request_license():
         "license_url": f"/download/license.txt",
         "xlsm_url": f"/download/{new_file}",
         "launcher_url": f"/download/Launcher.xlsm",
-        "installer_url": f"/download/installer_lifetime.exe",
         "license": license_text
     })
 
